@@ -9,22 +9,22 @@ find_package(toml11 CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(FFMPEG REQUIRED)
 
+add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
+
 file(GLOB SOURCE_FILES RELATIVE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
 )
 
-add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
+target_compile_features(${PROJECT_NAME}
+    PRIVATE
+    cxx_std_23)
 
 target_sources(${PROJECT_NAME}
     PRIVATE
     ${SOURCE_FILES}
 )
-
-target_compile_features(${PROJECT_NAME}
-    PRIVATE
-    cxx_std_23)
 
 target_include_directories(${PROJECT_NAME}
     PRIVATE
