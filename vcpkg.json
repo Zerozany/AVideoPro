@@ -1,0 +1,10 @@
+{
+    "name": "avideo-pro",
+    "version": "1.0.0",
+    "dependencies": [
+        "spdlog",
+        "toml11",
+        "ffmpeg"
+    ],
+    "builtin-baseline": "efb1e7436979a30c4d3e5ab2375fd8e2e461d541"
+}
