@@ -1,26 +1,11 @@
-#include <iostream>
-
-extern "C" {
-#include <libavutil/log.h>
-#include <libavutil/mem.h>
-}
+#include "FormatAV.h"
 
 int main(int argc, char const* argv[])
 {
-    av_log_set_level(AV_LOG_DEBUG);
-    int* ptr = static_cast<int*>(av_malloc(sizeof(int)));
-    *ptr     = 101;
-    std::cout << *ptr << '\n';
-    av_free(static_cast<void*>(ptr));
-    std::cout << *ptr << '\n';
-    ptr = nullptr;
-    if (!ptr)
-    {
-        std::cout << "free" << '\n';
-    }
-    else
-    {
-        std::cout << "no free" << '\n';
-    }
+    FormatAV av{R"(F:\DeskTop\Destiny2\test01.mp4)"};
+    av.read();
     return 0;
 }
+
+// rtmp://ns8.indexforce.com/home/mystream  伊拉克直播电视台
+// rtsp://77.110.228.219/axis-media/media.amp
