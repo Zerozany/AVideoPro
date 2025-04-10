@@ -6,8 +6,8 @@ extern "C" {
 #include <libavutil/avutil.h>
 #include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
-
 }
+
 #include <functional>
 #include <iostream>
 #include <ranges>
@@ -32,5 +32,5 @@ private:
     int              m_video_index{};
     AVFrame*         m_frame{av_frame_alloc()};
     AVPacket*        m_packet{av_packet_alloc()};
-    SwsContext*      sws_ctx{nullptr};
+    SwsContext*      m_sws_ctx{nullptr};
 };

@@ -5,6 +5,8 @@ set(CMAKE_TOOLCHAIN_FILE "D:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRIN
 # set(VCPKG_TARGET_TRIPLET "x64-windows-static-md" CACHE STRING "Static link dynamic call")
 project(avideoPro VERSION 1.0)
 
+set(OpenCV_ROOT "${VCPKG_INSTALLED_DIR}/x64-windows/share/opencv4")
+find_package(OpenCV REQUIRED)
 find_package(toml11 CONFIG REQUIRED)
 find_package(FFMPEG REQUIRED)
 
@@ -27,13 +29,18 @@ target_sources(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME}
     PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${FFMPEG_INCLUDE_DIRS})
+    ${FFMPEG_INCLUDE_DIRS}
+    (${OpenCV_INCLUDE_DIRS})
+)
 
 target_link_directories(${PROJECT_NAME}
     PRIVATE
-    ${FFMPEG_LIBRARY_DIRS})
+    ${FFMPEG_LIBRARY_DIRS}
+)
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
     toml11::toml11
-    ${FFMPEG_LIBRARIES})
+    ${FFMPEG_LIBRARIES}
+    ${OpenCV_LIBS}
+)

@@ -3,7 +3,8 @@
     "version": "1.0.0",
     "dependencies": [
         "toml11",
+        "opencv4",
         "ffmpeg"
     ],
-    "builtin-baseline": "efb1e7436979a30c4d3e5ab2375fd8e2e461d541"
+    "builtin-baseline": "20a72ce99b12dd0ebfea5d39f32681bd68b19d03"
 }
