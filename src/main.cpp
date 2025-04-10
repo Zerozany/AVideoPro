@@ -2,7 +2,7 @@
 
 int main(int argc, char const* argv[])
 {
-    FormatAV av{R"(rtsp://172.16.6.100:554/stream0)"};
+    FormatAV av{R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)"};
     av.read();
     return 0;
 }

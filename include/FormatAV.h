@@ -8,7 +8,6 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-#include <functional>
 #include <iostream>
 #include <ranges>
 #include <string>
@@ -25,8 +24,11 @@ public:
 private:
     auto av_init() noexcept -> bool;
 
+    auto set_dict(std::string _type) noexcept -> void;
+
 private:
     std::string      m_url{};
+    AVDictionary*    m_options{nullptr};
     AVFormatContext* m_format_ctx{avformat_alloc_context()};
     AVCodecContext*  m_codec_ctx{nullptr};
     int              m_video_index{};
