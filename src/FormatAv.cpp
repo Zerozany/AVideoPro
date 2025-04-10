@@ -81,13 +81,37 @@ finish:
 
 auto FormatAV::av_init() noexcept -> bool
 {
-    if (avformat_open_input(&m_format_ctx, m_url.c_str(), nullptr, nullptr) < 0)
+    AVDictionary* options = nullptr;
+
+    // 设置分析持续时间为较小的值（例如 1000000 微秒，即 1 秒）
+    av_dict_set(&options, "analyzeduration", "1000000", 0);
+
+    // 设置探测大小为较小的值（例如 500000 字节）
+    av_dict_set(&options, "probesize", "500000", 0);
+
+    // 设置最大延迟（例如，100ms）
+    av_dict_set(&options, "max_delay", "100", 0);
+
+    // 禁用内部缓冲，减少延迟
+    av_dict_set(&options, "fflags", "nobuffer", 0);
+
+    // 选择 GPU 设备
+    av_dict_set(&options, "hwaccel_device", "0", 0);
+
+    // 强制使用 TCP
+    av_dict_set(&options, "rtsp_transport", "tcp", 0);
+
+    // 降低帧率
+    av_dict_set(&options, "r", "30", 0);
+
+    if (avformat_open_input(&m_format_ctx, m_url.c_str(), nullptr, &options) < 0)
     {
         av_log(nullptr, AV_LOG_ERROR, "The input address is invalid:%s\n", m_url.data());
         return false;
     }
-    av_log(nullptr, AV_LOG_DEBUG, "The input address is:%s\n", m_format_ctx->url);
 
+    av_dict_free(&options);
+    // av_log(nullptr, AV_LOG_DEBUG, "The input address is:%s\n", m_format_ctx->url);
     // std::cout << "Format: " << m_format_ctx->iformat->name << std::endl;
     // std::cout << "Number of streams: " << m_format_ctx->nb_streams << std::endl;
     // if (m_format_ctx->duration != AV_NOPTS_VALUE)
