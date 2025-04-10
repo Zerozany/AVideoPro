@@ -8,8 +8,6 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-#include <iostream>
-#include <ranges>
 #include <string>
 
 class FormatAV

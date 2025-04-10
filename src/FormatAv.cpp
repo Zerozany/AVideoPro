@@ -1,7 +1,9 @@
 #include "FormatAV.h"
 
 #include <functional>
+#include <iostream>
 #include <opencv2/opencv.hpp>
+#include <ranges>
 
 FormatAV::FormatAV(const std::string& _url) : m_url{_url}
 {
@@ -70,7 +72,9 @@ auto FormatAV::read() noexcept -> void
                     // 显示图像
                     cv::imshow("Video Playback", img_bgr);
                     if (cv::waitKey(1) == 27)  // 按 ESC 退出
+                    {
                         goto finish;
+                    }
                 }
             }
         }
