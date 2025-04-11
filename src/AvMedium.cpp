@@ -21,14 +21,16 @@ AvMedium::~AvMedium() noexcept
 {
     av_dict_free(&m_options);
     avformat_free_context(m_format_ctx);
+    av_log(nullptr, AV_LOG_INFO, "Media playback has been turned off");
 }
 
-// #define OPENCV
-#define SDL2
+#define OPENCV
+// #define SDL2
 
 #ifdef OPENCV
 auto AvMedium::read() noexcept -> void
 {
+    cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
     cv::namedWindow("Video Playback", cv::WINDOW_NORMAL);
 
     // 先确保 m_frame->format 是有效的 AVPixelFormat
@@ -180,6 +182,7 @@ auto AvMedium::read() noexcept -> void
     bgr_frame->format  = AV_PIX_FMT_BGR24;
     bgr_frame->width   = src_w;
     bgr_frame->height  = src_h;
+    // 分配内存缓冲区
     av_frame_get_buffer(bgr_frame, 0);
 
     bool      running = true;
@@ -245,21 +248,30 @@ auto AvMedium::set_dict(std::string _type) noexcept -> void
         // 设置分析持续时间为较小的值（例如 1000000 微秒，即 1 秒）
         av_dict_set(&m_options, "analyzeduration", "1", 0);
 
-        // 设置探测大小为较小的值（例如 500000 字节）
-        av_dict_set(&m_options, "probesize", "200000", 0);
+        // 设置探测大小为较小的值（例如 5000000 字节）
+        av_dict_set(&m_options, "probesize", "300000", 0);
 
         // 设置最大延迟（例如，100ms）
         av_dict_set(&m_options, "max_delay", "100", 0);
 
         // 禁用内部缓冲，减少延迟
-        av_dict_set(&m_options, "fflags", "nobuffer", 0);
+        av_dict_set(&m_options, "fflags", "ignidx+nobuffer+nofillin+discardcorrupt", 0);
 
         // 选择 GPU 设备
         // av_dict_set(&m_options, "hwaccel", "cuda", 0);
-        av_dict_set(&m_options, "hwaccel_device", "0", 0);
+        // av_dict_set(&m_options, "hwaccel_device", "0", 0);
 
         // 延迟最低
         av_dict_set(&m_options, "flags", "low_delay", 0);
+
+        // 非阻塞模式
+        av_dict_set_int(&m_options, "avioflags", AVIO_FLAG_NONBLOCK, 0);
+
+        // 控制为流索引（timestamp index）分配的最大内存1MB
+        av_dict_set(&m_options, "indexmem", "1048576", 0);
+
+        // 启用 RTP MP4A-LATM Payload
+        av_dict_set(&m_options, "latm", "1", 0);
 
         // 降低帧率
         // av_dict_set(&m_options, "r", "30", 0);
@@ -267,9 +279,28 @@ auto AvMedium::set_dict(std::string _type) noexcept -> void
         // 帧丢弃（防止堵塞）
         av_dict_set(&m_options, "framedrop", "1", 0);
 
+        // 增加缓冲
+        av_dict_set(&m_options, "buffer_size", "32768", 0);
+
+        // 断线重连
         av_dict_set(&m_options, "reconnect", "1", 0);
+
+        // 流结束后重连
+        av_dict_set(&m_options, "reconnect_at_eof", "1", 0);
+
         av_dict_set(&m_options, "reconnect_streamed", "1", 0);
         av_dict_set(&m_options, "reconnect_delay_max", "5", 0);
+
+        av_dict_set(&m_options, "err_detect", "none", 0);                // 禁用错误检测
+        av_dict_set(&m_options, "crccheck", "0", 0);                     // 禁用 CRC 校验
+        av_dict_set(&m_options, "bitstream", "0", 0);                    // 禁用比特流检测
+        av_dict_set(&m_options, "buffer", "0", 0);                       // 禁用比特流长度检测
+        av_dict_set(&m_options, "explode", "0", 0);                      // 禁用错误中止
+        av_dict_set(&m_options, "careful", "0", 0);                      // 禁用严格错误检测
+        av_dict_set(&m_options, "compliant", "0", 0);                    // 禁用规范性检查
+        av_dict_set(&m_options, "aggressive", "0", 0);                   // 禁用过度检查
+        av_dict_set(&m_options, "use_wallclock_as_timestamps", "0", 0);  // 禁用墙钟时间作为时间戳
+        av_dict_set(&m_options, "skip_initial_bytes", "0", 0);           // 禁用跳过初始字节
     }
     else if (m_url.find("http://") == 0 || m_url.find("https://") == 0)
     {
@@ -319,8 +350,16 @@ auto AvMedium::av_init() noexcept -> bool
         av_log(nullptr, AV_LOG_ERROR, "Could not allocate codec context\n");
         return false;
     }
-    m_codec_ctx->thread_count = 4;
-    m_codec_ctx->thread_type  = FF_THREAD_FRAME;
+    // m_codec_ctx->codec_id      = AV_CODEC_ID_H264;      // 指定使用的编码器为 H.264
+    // m_codec_ctx->codec_type    = AVMEDIA_TYPE_VIDEO;    // 表示当前上下文是用于“视频”而非音频或字幕
+    m_codec_ctx->thread_count = 4;                // 设置编码时使用的线程数为 8
+    m_codec_ctx->thread_type  = FF_THREAD_FRAME;  // 表示当前上下文是用于“视频”而非音频或字幕
+    // m_codec_ctx->bit_rate      = 8000000;               // 设置目标码率为 8 Mbps
+    // const AVRational framerate = {30, 1};               // 定义帧率为 30fps
+    // m_codec_ctx->time_base     = av_inv_q(framerate);   // 每一帧之间的时间间隔是 1/30秒
+    // m_codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;  // 将一些编码器头信息（如 SPS、PPS）写到 extradata 中
+    // m_codec_ctx->flags2 |= AV_CODEC_FLAG_PASS2;         // 双通道编码的第二通
+
     if (avcodec_parameters_to_context(m_codec_ctx, codec_parameters) < 0)
     {
         av_log(nullptr, AV_LOG_ERROR, "Could not copy codec parameters to context\n");
@@ -333,11 +372,18 @@ auto AvMedium::av_init() noexcept -> bool
         av_log(nullptr, AV_LOG_ERROR, "Could supported codec\n");
         return false;
     }
-    if (avcodec_open2(m_codec_ctx, codec, nullptr) < 0)
+    AVDictionary* opt = nullptr;
+    av_dict_set(&opt, "crf", "23", 0);
+    av_dict_set(&opt, "rc_mode", "CBR", 0);
+    av_dict_set(&opt, "preset", "medium", 0);
+    av_dict_set(&opt, "tune", "zerolatency", 0);
+    av_dict_set(&opt, "x264-params", "keyint=30:min-keyint=30;profile=high", 0);
+    if (avcodec_open2(m_codec_ctx, codec, &opt) < 0)
     {
         av_log(nullptr, AV_LOG_ERROR, "Could not allocate codec context\n");
         return false;
     }
+    av_dict_free(&opt);
 #endif
     return true;
 }

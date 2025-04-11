@@ -1,8 +1,10 @@
 #include "AvMedium.h"
+#include "Version.hpp"
 
 int main(int argc, char const* argv[])
 {
     AvMedium av{R"(rtsp://172.16.6.100:554/stream0)"};
+    // std::cout << AVideoPro::Version() << '\n';
     av.read();
     return 0;
 }
@@ -11,3 +13,4 @@ int main(int argc, char const* argv[])
 // rtsp://77.110.228.219/axis-media/media.amp
 // rtsp://172.16.6.100:554/stream0
 // rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid
+// http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/gear2/prog_index.m3u8
