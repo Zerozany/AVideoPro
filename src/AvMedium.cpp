@@ -305,13 +305,23 @@ auto AvMedium::set_dict(std::string _type) noexcept -> void
     else if (m_url.find("rtmp://") == 0)
     {
         av_dict_set(&m_options, "rtmp_tcp_nodelay", "1", 0);
-
         av_dict_set(&m_options, "rtmp_buffer", "32768", 0);
+        av_dict_set(&m_options, "timeout", "5000000", 0);
+        av_dict_set(&m_options, "fflags", "nobuffer+flush_packets", 0);
+        av_dict_set(&m_options, "flags", "low_delay", 0);
+        av_dict_set(&m_options, "reconnect", "1", 0);
+        av_dict_set(&m_options, "reconnect_at_eof", "1", 0);
+        av_dict_set(&m_options, "reconnect_delay_max", "5", 0);
     }
     else if (m_url.find("http://") == 0 || m_url.find("https://") == 0)
     {
         // 5秒超时
         av_dict_set(&m_options, "stimeout", "5000000", 0);
+        av_dict_set(&m_options, "fflags", "nobuffer+flush_packets", 0);
+        av_dict_set(&m_options, "flags", "low_delay", 0);
+        av_dict_set(&m_options, "analyzeduration", "100000", 0);
+        av_dict_set(&m_options, "probesize", "50000", 0);
+        av_dict_set(&m_options, "reconnect", "1", 0);
     }
 }
 

@@ -3,7 +3,7 @@
 
 int main(int argc, char const* argv[])
 {
-    AvMedium av{R"(rtsp://172.16.6.100:554/stream0)"};
+    AvMedium av{R"(rtmp://ns8.indexforce.com/home/mystream )"};
     // std::cout << AVideoPro::Version() << '\n';
     av.read();
     return 0;
