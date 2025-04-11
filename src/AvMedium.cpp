@@ -302,6 +302,12 @@ auto AvMedium::set_dict(std::string _type) noexcept -> void
         av_dict_set(&m_options, "use_wallclock_as_timestamps", "0", 0);  // 禁用墙钟时间作为时间戳
         av_dict_set(&m_options, "skip_initial_bytes", "0", 0);           // 禁用跳过初始字节
     }
+    else if (m_url.find("rtmp://") == 0)
+    {
+        av_dict_set(&m_options, "rtmp_tcp_nodelay", "1", 0);
+
+        av_dict_set(&m_options, "rtmp_buffer", "32768", 0);
+    }
     else if (m_url.find("http://") == 0 || m_url.find("https://") == 0)
     {
         // 5秒超时
