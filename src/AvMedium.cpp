@@ -1,27 +1,33 @@
-#include "FormatAV.h"
+#include "AvMedium.h"
+
+#include <SDL2/SDL.h>
 
 #include <functional>
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include <ranges>
 
-FormatAV::FormatAV(const std::string& _url) : m_url{_url}
+AvMedium::AvMedium(const std::string& _url) : m_url{_url}
 {
     std::invoke(av_log_set_level, AV_LOG_DEBUG);
-    std::invoke(&FormatAV::set_dict, this, m_url);
-    if (!std::invoke(&FormatAV::av_init, this))
+    std::invoke(&AvMedium::set_dict, this, m_url);
+    if (!std::invoke(&AvMedium::av_init, this))
     {
         return;
     }
 }
 
-FormatAV::~FormatAV() noexcept
+AvMedium::~AvMedium() noexcept
 {
     av_dict_free(&m_options);
     avformat_free_context(m_format_ctx);
 }
 
-auto FormatAV::read() noexcept -> void
+// #define OPENCV
+#define SDL2
+
+#ifdef OPENCV
+auto AvMedium::read() noexcept -> void
 {
     cv::namedWindow("Video Playback", cv::WINDOW_NORMAL);
 
@@ -40,9 +46,10 @@ auto FormatAV::read() noexcept -> void
     SwsContext* sws_ctx = sws_getContext(
         src_w, src_h, src_fmt,
         src_w, src_h, AV_PIX_FMT_BGR24,
-        SWS_FAST_BILINEAR, nullptr, nullptr, nullptr);
+        SWS_LANCZOS, nullptr, nullptr, nullptr);
     // SWS_BICUBIC 双三次插值
     // SWS_LANCZOS 高清图片
+    // SWS_FAST_BILINEAR 低延迟低质量图片
 
     if (!sws_ctx)
     {
@@ -85,8 +92,147 @@ finish:
     sws_freeContext(sws_ctx);
     cv::destroyAllWindows();
 }
+#endif
 
-auto FormatAV::set_dict(std::string _type) noexcept -> void
+#ifdef SDL2
+auto AvMedium::read() noexcept -> void
+{
+    // 初始化SDL
+    if (SDL_Init(SDL_INIT_VIDEO) != 0)
+    {
+        std::cerr << "SDL初始化失败: " << SDL_GetError() << std::endl;
+        return;
+    }
+
+    // 获取视频参数
+    AVPixelFormat src_fmt = static_cast<AVPixelFormat>(m_codec_ctx->pix_fmt);
+    int           src_w   = m_codec_ctx->width;
+    int           src_h   = m_codec_ctx->height;
+
+    if (src_fmt == AV_PIX_FMT_NONE)
+    {
+        std::cerr << "无效的像素格式!" << std::endl;
+        SDL_Quit();
+        return;
+    }
+
+    // 创建SDL窗口和渲染器
+    SDL_Window* window = SDL_CreateWindow(
+        "Video Playback",
+        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED,
+        src_w, src_h,
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+
+    if (!window)
+    {
+        std::cerr << "无法创建SDL窗口: " << SDL_GetError() << std::endl;
+        SDL_Quit();
+        return;
+    }
+
+    SDL_Renderer* renderer = SDL_CreateRenderer(
+        window, -1,
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+
+    if (!renderer)
+    {
+        std::cerr << "无法创建SDL渲染器: " << SDL_GetError() << std::endl;
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return;
+    }
+
+    // 创建SDL纹理
+    SDL_Texture* texture = SDL_CreateTexture(
+        renderer,
+        SDL_PIXELFORMAT_BGR24,
+        SDL_TEXTUREACCESS_STREAMING,
+        src_w, src_h);
+
+    if (!texture)
+    {
+        std::cerr << "无法创建SDL纹理: " << SDL_GetError() << std::endl;
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return;
+    }
+
+    // 初始化图像转换上下文
+    SwsContext* sws_ctx = sws_getContext(
+        src_w, src_h, src_fmt,
+        src_w, src_h, AV_PIX_FMT_BGR24,
+        SWS_BILINEAR, nullptr, nullptr, nullptr);
+
+    if (!sws_ctx)
+    {
+        std::cerr << "无法创建SwsContext!" << std::endl;
+        SDL_DestroyTexture(texture);
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return;
+    }
+
+    // 创建帧缓冲区
+    AVFrame* bgr_frame = av_frame_alloc();
+    bgr_frame->format  = AV_PIX_FMT_BGR24;
+    bgr_frame->width   = src_w;
+    bgr_frame->height  = src_h;
+    av_frame_get_buffer(bgr_frame, 0);
+
+    bool      running = true;
+    SDL_Event event;
+
+    while (running && av_read_frame(m_format_ctx, m_packet) >= 0)
+    {
+        // 处理SDL事件
+        while (SDL_PollEvent(&event))
+        {
+            if (event.type == SDL_QUIT ||
+                (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE))
+            {
+                running = false;
+            }
+        }
+
+        if (m_packet->stream_index == m_video_index)
+        {
+            if (avcodec_send_packet(m_codec_ctx, m_packet) == 0)
+            {
+                while (avcodec_receive_frame(m_codec_ctx, m_frame) == 0)
+                {
+                    // 转换图像格式
+                    sws_scale(sws_ctx,
+                              m_frame->data, m_frame->linesize,
+                              0, src_h,
+                              bgr_frame->data, bgr_frame->linesize);
+
+                    // 更新SDL纹理
+                    SDL_UpdateTexture(texture, nullptr, bgr_frame->data[0], bgr_frame->linesize[0]);
+
+                    // 渲染
+                    SDL_RenderClear(renderer);
+                    SDL_RenderCopy(renderer, texture, nullptr, nullptr);
+                    SDL_RenderPresent(renderer);
+                }
+            }
+        }
+        av_packet_unref(m_packet);
+    }
+
+    // 清理资源
+    av_frame_free(&bgr_frame);
+    sws_freeContext(sws_ctx);
+    SDL_DestroyTexture(texture);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+}
+#endif
+
+auto AvMedium::set_dict(std::string _type) noexcept -> void
 {
     if (m_url.find("rtsp://") == 0) [[likely]]
     {
@@ -97,10 +243,10 @@ auto FormatAV::set_dict(std::string _type) noexcept -> void
         av_dict_set(&m_options, "stimeout", "5000000", 0);
 
         // 设置分析持续时间为较小的值（例如 1000000 微秒，即 1 秒）
-        av_dict_set(&m_options, "analyzeduration", "1000000", 0);
+        av_dict_set(&m_options, "analyzeduration", "1", 0);
 
         // 设置探测大小为较小的值（例如 500000 字节）
-        av_dict_set(&m_options, "probesize", "500000", 0);
+        av_dict_set(&m_options, "probesize", "200000", 0);
 
         // 设置最大延迟（例如，100ms）
         av_dict_set(&m_options, "max_delay", "100", 0);
@@ -109,10 +255,21 @@ auto FormatAV::set_dict(std::string _type) noexcept -> void
         av_dict_set(&m_options, "fflags", "nobuffer", 0);
 
         // 选择 GPU 设备
+        // av_dict_set(&m_options, "hwaccel", "cuda", 0);
         av_dict_set(&m_options, "hwaccel_device", "0", 0);
 
+        // 延迟最低
+        av_dict_set(&m_options, "flags", "low_delay", 0);
+
         // 降低帧率
-        av_dict_set(&m_options, "r", "30", 0);
+        // av_dict_set(&m_options, "r", "30", 0);
+
+        // 帧丢弃（防止堵塞）
+        av_dict_set(&m_options, "framedrop", "1", 0);
+
+        av_dict_set(&m_options, "reconnect", "1", 0);
+        av_dict_set(&m_options, "reconnect_streamed", "1", 0);
+        av_dict_set(&m_options, "reconnect_delay_max", "5", 0);
     }
     else if (m_url.find("http://") == 0 || m_url.find("https://") == 0)
     {
@@ -121,7 +278,7 @@ auto FormatAV::set_dict(std::string _type) noexcept -> void
     }
 }
 
-auto FormatAV::av_init() noexcept -> bool
+auto AvMedium::av_init() noexcept -> bool
 {
     if (avformat_open_input(&m_format_ctx, m_url.c_str(), nullptr, &m_options) < 0)
     {
@@ -162,7 +319,8 @@ auto FormatAV::av_init() noexcept -> bool
         av_log(nullptr, AV_LOG_ERROR, "Could not allocate codec context\n");
         return false;
     }
-
+    m_codec_ctx->thread_count = 4;
+    m_codec_ctx->thread_type  = FF_THREAD_FRAME;
     if (avcodec_parameters_to_context(m_codec_ctx, codec_parameters) < 0)
     {
         av_log(nullptr, AV_LOG_ERROR, "Could not copy codec parameters to context\n");

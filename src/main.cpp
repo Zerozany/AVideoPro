@@ -1,8 +1,8 @@
-#include "FormatAV.h"
+#include "AvMedium.h"
 
 int main(int argc, char const* argv[])
 {
-    FormatAV av{R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)"};
+    AvMedium av{R"(rtsp://172.16.6.100:554/stream0)"};
     av.read();
     return 0;
 }

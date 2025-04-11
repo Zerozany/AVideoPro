@@ -10,11 +10,11 @@ extern "C" {
 
 #include <string>
 
-class FormatAV
+class AvMedium
 {
 public:
-    explicit(true) FormatAV(const std::string& _url);
-    ~FormatAV() noexcept;
+    explicit(true) AvMedium(const std::string& _url);
+    ~AvMedium() noexcept;
 
 public:
     auto read() noexcept -> void;
