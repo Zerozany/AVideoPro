@@ -1,11 +1,17 @@
 #include "AvMedium.h"
 
 #include <SDL2/SDL.h>
+#include <spdlog/spdlog.h>
 
 #include <functional>
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include <ranges>
+
+extern "C" {
+#include <libavutil/avutil.h>
+#include <libavutil/imgutils.h>
+}
 
 AvMedium::AvMedium(const std::string& _url) : m_url{_url}
 {
@@ -19,9 +25,8 @@ AvMedium::AvMedium(const std::string& _url) : m_url{_url}
 
 AvMedium::~AvMedium() noexcept
 {
-    av_dict_free(&m_options);
     avformat_free_context(m_format_ctx);
-    av_log(nullptr, AV_LOG_INFO, "Media playback has been turned off");
+    spdlog::info("Media playback has been turned off");
 }
 
 #define OPENCV
@@ -235,105 +240,116 @@ auto AvMedium::read() noexcept -> void
 }
 #endif
 
-auto AvMedium::set_dict(std::string _type) noexcept -> void
+auto AvMedium::set_dict(std::string _url) noexcept -> AVDictionary*
 {
-    if (m_url.find("rtsp://") == 0) [[likely]]
+    AVDictionary* __options{nullptr};
+    if (_url.find("rtsp://") == 0) [[likely]]
     {
         // 强制使用 TCP
-        av_dict_set(&m_options, "rtsp_transport", "tcp", 0);
+        av_dict_set(&__options, "rtsp_transport", "tcp", 0);
 
         // 5秒超时
-        av_dict_set(&m_options, "stimeout", "5000000", 0);
+        av_dict_set(&__options, "stimeout", "5000000", 0);
 
         // 设置分析持续时间为较小的值（例如 1000000 微秒，即 1 秒）
-        av_dict_set(&m_options, "analyzeduration", "1", 0);
+        av_dict_set(&__options, "analyzeduration", "1", 0);
 
         // 设置探测大小为较小的值（例如 5000000 字节）
-        av_dict_set(&m_options, "probesize", "300000", 0);
+        av_dict_set(&__options, "probesize", "300000", 0);
 
         // 设置最大延迟（例如，100ms）
-        av_dict_set(&m_options, "max_delay", "100", 0);
+        av_dict_set(&__options, "max_delay", "100", 0);
 
         // 禁用内部缓冲，减少延迟
-        av_dict_set(&m_options, "fflags", "ignidx+nobuffer+nofillin+discardcorrupt", 0);
+        av_dict_set(&__options, "fflags", "ignidx+nobuffer+nofillin+discardcorrupt", 0);
 
         // 选择 GPU 设备
-        // av_dict_set(&m_options, "hwaccel", "cuda", 0);
-        // av_dict_set(&m_options, "hwaccel_device", "0", 0);
+        // av_dict_set(&__options, "hwaccel", "cuda", 0);
+        // av_dict_set(&__options, "hwaccel_device", "0", 0);
 
         // 延迟最低
-        av_dict_set(&m_options, "flags", "low_delay", 0);
+        av_dict_set(&__options, "flags", "low_delay", 0);
 
         // 非阻塞模式
-        av_dict_set_int(&m_options, "avioflags", AVIO_FLAG_NONBLOCK, 0);
+        av_dict_set_int(&__options, "avioflags", AVIO_FLAG_NONBLOCK, 0);
 
         // 控制为流索引（timestamp index）分配的最大内存1MB
-        av_dict_set(&m_options, "indexmem", "1048576", 0);
+        av_dict_set(&__options, "indexmem", "1048576", 0);
 
         // 启用 RTP MP4A-LATM Payload
-        av_dict_set(&m_options, "latm", "1", 0);
+        av_dict_set(&__options, "latm", "1", 0);
 
         // 降低帧率
-        // av_dict_set(&m_options, "r", "30", 0);
+        // av_dict_set(&__options, "r", "30", 0);
 
         // 帧丢弃（防止堵塞）
-        av_dict_set(&m_options, "framedrop", "1", 0);
+        av_dict_set(&__options, "framedrop", "1", 0);
 
         // 增加缓冲
-        av_dict_set(&m_options, "buffer_size", "32768", 0);
+        av_dict_set(&__options, "buffer_size", "32768", 0);
 
         // 断线重连
-        av_dict_set(&m_options, "reconnect", "1", 0);
+        av_dict_set(&__options, "reconnect", "1", 0);
 
         // 流结束后重连
-        av_dict_set(&m_options, "reconnect_at_eof", "1", 0);
+        av_dict_set(&__options, "reconnect_at_eof", "1", 0);
 
-        av_dict_set(&m_options, "reconnect_streamed", "1", 0);
-        av_dict_set(&m_options, "reconnect_delay_max", "5", 0);
+        av_dict_set(&__options, "reconnect_streamed", "1", 0);
+        av_dict_set(&__options, "reconnect_delay_max", "5", 0);
 
-        av_dict_set(&m_options, "err_detect", "none", 0);                // 禁用错误检测
-        av_dict_set(&m_options, "crccheck", "0", 0);                     // 禁用 CRC 校验
-        av_dict_set(&m_options, "bitstream", "0", 0);                    // 禁用比特流检测
-        av_dict_set(&m_options, "buffer", "0", 0);                       // 禁用比特流长度检测
-        av_dict_set(&m_options, "explode", "0", 0);                      // 禁用错误中止
-        av_dict_set(&m_options, "careful", "0", 0);                      // 禁用严格错误检测
-        av_dict_set(&m_options, "compliant", "0", 0);                    // 禁用规范性检查
-        av_dict_set(&m_options, "aggressive", "0", 0);                   // 禁用过度检查
-        av_dict_set(&m_options, "use_wallclock_as_timestamps", "0", 0);  // 禁用墙钟时间作为时间戳
-        av_dict_set(&m_options, "skip_initial_bytes", "0", 0);           // 禁用跳过初始字节
+        av_dict_set(&__options, "err_detect", "none", 0);  // 禁用错误检测
+        av_dict_set(&__options, "crccheck", "0", 0);       // 禁用 CRC 校验
+        av_dict_set(&__options, "bitstream", "0", 0);      // 禁用比特流检测
+        av_dict_set(&__options, "buffer", "0", 0);         // 禁用比特流长度检测
+        av_dict_set(&__options, "explode", "0", 0);        // 禁用错误中止
+        av_dict_set(&__options, "careful", "0", 0);        // 禁用严格错误检测
+        av_dict_set(&__options, "compliant", "0", 0);      // 禁用规范性检查
+        av_dict_set(&__options, "aggressive", "0", 0);     // 禁用过度检查
+        // av_dict_set(&__options, "use_wallclock_as_timestamps", "0", 0);  // 禁用墙钟时间作为时间戳
+        av_dict_set(&__options, "skip_initial_bytes", "0", 0);  // 禁用跳过初始字节
     }
-    else if (m_url.find("rtmp://") == 0)
+    else if (_url.find("rtmp://") == 0)
     {
-        av_dict_set(&m_options, "rtmp_tcp_nodelay", "1", 0);
-        av_dict_set(&m_options, "rtmp_buffer", "32768", 0);
-        av_dict_set(&m_options, "timeout", "5000000", 0);
-        av_dict_set(&m_options, "fflags", "nobuffer+flush_packets", 0);
-        av_dict_set(&m_options, "flags", "low_delay", 0);
-        av_dict_set(&m_options, "reconnect", "1", 0);
-        av_dict_set(&m_options, "reconnect_at_eof", "1", 0);
-        av_dict_set(&m_options, "reconnect_delay_max", "5", 0);
+        av_dict_set(&__options, "rtmp_tcp_nodelay", "1", 0);
+        av_dict_set(&__options, "rtmp_buffer", "32768", 0);
+        av_dict_set(&__options, "timeout", "5000000", 0);
+        av_dict_set(&__options, "fflags", "nobuffer+flush_packets", 0);
+        av_dict_set(&__options, "flags", "low_delay", 0);
+        av_dict_set(&__options, "reconnect", "1", 0);
+        av_dict_set(&__options, "reconnect_at_eof", "1", 0);
+        av_dict_set(&__options, "reconnect_delay_max", "5", 0);
     }
-    else if (m_url.find("http://") == 0 || m_url.find("https://") == 0)
+    else if (_url.find("http://") == 0 || _url.find("https://") == 0)
     {
         // 5秒超时
-        av_dict_set(&m_options, "stimeout", "5000000", 0);
-        av_dict_set(&m_options, "fflags", "nobuffer+flush_packets", 0);
-        av_dict_set(&m_options, "flags", "low_delay", 0);
-        av_dict_set(&m_options, "analyzeduration", "100000", 0);
-        av_dict_set(&m_options, "probesize", "50000", 0);
-        av_dict_set(&m_options, "reconnect", "1", 0);
+        av_dict_set(&__options, "stimeout", "5000000", 0);
+        av_dict_set(&__options, "fflags", "nobuffer+flush_packets", 0);
+        av_dict_set(&__options, "flags", "low_delay", 0);
+        av_dict_set(&__options, "analyzeduration", "100000", 0);
+        av_dict_set(&__options, "probesize", "50000", 0);
+        av_dict_set(&__options, "reconnect", "1", 0);
     }
+    // av_dict_set(&__options, "sync", "video", 0);
+    return __options;
 }
 
 auto AvMedium::av_init() noexcept -> bool
 {
-    if (avformat_open_input(&m_format_ctx, m_url.c_str(), nullptr, &m_options) < 0)
+    AVDictionary* format_options{this->set_dict(m_url)};
+    if (!format_options)
     {
-        av_log(nullptr, AV_LOG_ERROR, "The input address is invalid:%s\n", m_url.data());
+        spdlog::debug("The input address isn't live:{}", m_url);
+    }
+    if (avformat_open_input(&m_format_ctx, m_url.c_str(), nullptr, &format_options) < 0)
+    {
+        spdlog::error("The input address is invalid:{}", m_url);
         return false;
     }
+    av_dict_free(&format_options);
+
     // av_log(nullptr, AV_LOG_DEBUG, "The input address is:%s\n", m_format_ctx->url);
-    av_log(nullptr, AV_LOG_DEBUG, "Format:%s\n", m_format_ctx->iformat->name);
+    spdlog::debug("The input address's format:{}", m_format_ctx->iformat->name);
+
     // if (m_format_ctx->duration != AV_NOPTS_VALUE)
     // {
     //     std::cout << "Duration: " << (m_format_ctx->duration / 1e6) << " sec" << std::endl;
@@ -344,14 +360,14 @@ auto AvMedium::av_init() noexcept -> bool
     // }
     if (avformat_find_stream_info(m_format_ctx, nullptr) < 0)
     {
-        av_log(nullptr, AV_LOG_ERROR, "Could not find stream\n");
+        spdlog::error("Could not find stream:{}", m_format_ctx->nb_streams);
         return false;
     }
 
     m_video_index = av_find_best_stream(m_format_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
     if (m_video_index < 0)
     {
-        av_log(nullptr, AV_LOG_ERROR, "Could not find vidoe stream\n");
+        spdlog::error("Could not find video stream:{}", m_video_index);
         return false;
     }
     // 从视频流中提取编解码参数（如编码格式、分辨率、帧率等）
@@ -363,7 +379,7 @@ auto AvMedium::av_init() noexcept -> bool
     m_codec_ctx = avcodec_alloc_context3(nullptr);
     if (!m_codec_ctx)
     {
-        av_log(nullptr, AV_LOG_ERROR, "Could not allocate codec context\n");
+        spdlog::error("Could not allocate codec context");
         return false;
     }
     // m_codec_ctx->codec_id      = AV_CODEC_ID_H264;      // 指定使用的编码器为 H.264
@@ -378,14 +394,14 @@ auto AvMedium::av_init() noexcept -> bool
 
     if (avcodec_parameters_to_context(m_codec_ctx, codec_parameters) < 0)
     {
-        av_log(nullptr, AV_LOG_ERROR, "Could not copy codec parameters to context\n");
+        spdlog::error("Could not copy codec parameters to context");
         return false;
     }
 
     const AVCodec* codec{avcodec_find_decoder(codec_parameters->codec_id)};
     if (!codec)
     {
-        av_log(nullptr, AV_LOG_ERROR, "Could supported codec\n");
+        spdlog::error("Could supported codec");
         return false;
     }
     AVDictionary* opt = nullptr;
@@ -396,7 +412,7 @@ auto AvMedium::av_init() noexcept -> bool
     av_dict_set(&opt, "x264-params", "keyint=30:min-keyint=30;profile=high", 0);
     if (avcodec_open2(m_codec_ctx, codec, &opt) < 0)
     {
-        av_log(nullptr, AV_LOG_ERROR, "Could not allocate codec context\n");
+        spdlog::error("Could not allocate codec context");
         return false;
     }
     av_dict_free(&opt);

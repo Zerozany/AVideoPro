@@ -10,6 +10,7 @@ find_package(OpenCV REQUIRED)
 find_package(toml11 CONFIG REQUIRED)
 find_package(FFMPEG REQUIRED)
 find_package(SDL2 CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
 add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
 
@@ -42,6 +43,7 @@ target_link_directories(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
     toml11::toml11
+    spdlog::spdlog
     ${FFMPEG_LIBRARIES}
     ${OpenCV_LIBS}
     $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
