@@ -1,16 +1,22 @@
-cmake_minimum_required(VERSION 3.29 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
-set(CMAKE_TOOLCHAIN_FILE "D:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
+set(CMAKE_TOOLCHAIN_FILE "F:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
 
 # set(VCPKG_TARGET_TRIPLET "x64-windows-static-md" CACHE STRING "Static link dynamic call")
 project(avideoPro VERSION 1.0)
 
-set(OpenCV_ROOT "${VCPKG_INSTALLED_DIR}/x64-windows/share/opencv4")
 find_package(OpenCV REQUIRED)
 find_package(toml11 CONFIG REQUIRED)
 find_package(FFMPEG REQUIRED)
+find_package(Boost REQUIRED COMPONENTS url)
 find_package(SDL2 CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+
+if(MSVC)
+    add_compile_options(/utf-8 /Zc:preprocessor) # 仅对 MSVC 生效
+else()
+    add_compile_options(-Wall -Wextra) # MinGW/GCC 的选项
+endif()
 
 add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
 
@@ -44,6 +50,7 @@ target_link_libraries(${PROJECT_NAME}
     PRIVATE
     toml11::toml11
     spdlog::spdlog
+    Boost::url
     ${FFMPEG_LIBRARIES}
     ${OpenCV_LIBS}
     $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>

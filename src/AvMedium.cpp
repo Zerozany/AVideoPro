@@ -3,9 +3,10 @@
 #include <SDL2/SDL.h>
 #include <spdlog/spdlog.h>
 
+#include <boost/url.hpp>
 #include <functional>
-#include <iostream>
 #include <opencv2/opencv.hpp>
+#include <print>
 #include <ranges>
 
 extern "C" {
@@ -16,23 +17,194 @@ extern "C" {
 AvMedium::AvMedium(const std::string& _url) : m_url{_url}
 {
     std::invoke(av_log_set_level, AV_LOG_DEBUG);
-    std::invoke(&AvMedium::set_dict, this, m_url);
-    if (!std::invoke(&AvMedium::av_init, this))
+    std::invoke(&AvMedium::checkUrl, this);
+    std::invoke(&AvMedium::avideoHandle, this);
+}
+
+AvMedium::~AvMedium() noexcept
+{
+    av_dict_free(&m_options);
+    avformat_free_context(m_format_ctx);
+}
+
+auto AvMedium::checkUrl() noexcept -> void
+{
+    auto urlStr{boost::urls::parse_uri(m_url)};
+    if (!urlStr.has_value())
+    {
+        return;
+    }
+    if (std::string{urlStr.value().scheme()} == std::string{"rtsp"})
+    {
+        m_urlFormat = UrlFormat::RTSP;
+    }
+    else if (std::string{urlStr.value().scheme()} == std::string{"rtmp"})
+    {
+        m_urlFormat = UrlFormat::RTMP;
+    }
+    else if (std::string{urlStr.value().scheme()} == std::string{"udp"})
+    {
+        m_urlFormat = UrlFormat::UDP;
+    }
+    else
+    {
+        m_urlFormat = UrlFormat::OTHER;
+    }
+}
+
+auto AvMedium::avideoHandle() noexcept -> void
+{
+    if (!std::invoke(&AvMedium::avOpenInput, this))
+    {
+        return;
+    }
+    if (!std::invoke(&AvMedium::findVideoStream, this))
+    {
+        return;
+    }
+    if (!std::invoke(&AvMedium::initCodecContext, this))
     {
         return;
     }
 }
 
-AvMedium::~AvMedium() noexcept
+auto AvMedium::smuSetOptions() noexcept -> void
 {
-    avformat_free_context(m_format_ctx);
-    spdlog::info("Media playback has been turned off");
+    std::vector<std::pair<const char*, const char*>> optionsMap{
+        {"buffer_size", "32768"},      // 网络缓冲大小，三协议均有效，UDP通常可适当调小
+        {"stimeout", "5000000"},       // 网络连接和读超时（微秒）
+        {"fflags", "nobuffer"},        // 禁用内部缓冲，减少延迟
+        {"flush_packets", "1"},        // 每包立即处理，减少延迟
+        {"analyzeduration", "0"},      // 禁止流分析，快速启动
+        {"framedrop", "1"},            // 丢帧防止阻塞，实时性关键
+        {"reconnect", "1"},            // 断线自动重连
+        {"reconnect_at_eof", "1"},     // 流结束自动重连
+        {"reconnect_streamed", "1"},   // 指定网络流
+        {"reconnect_delay_max", "5"},  // 最大重连间隔秒
+        {"avioflags", "8"},            // 非阻塞IO
+        {"flags", "low_delay"},        // 编解码低延迟标志
+
+    };
+    for (const auto& [__key, __value] : optionsMap)
+    {
+        av_dict_set(&m_options, __key, __value, 0);
+    }
+}
+
+auto AvMedium::rtspSetOptions() noexcept -> void
+{
+    std::vector<std::pair<const char*, const char*>> optionsMap{
+        {"rtsp_transport", "tcp"},    // RTSP专用，指定传输协议
+        {"reorder_queue_size", "0"},  // 禁用帧重排序，RTSP流中B帧多时有效
+        {"seekable", "0"},            // 禁用seek，直播流常用
+        {"err_detect", "none"},       // 错误检测关闭，容错性强
+        {"explode", "0"},
+        {"buffer", "0"},
+        {"careful", "0"},
+        {"compliant", "0"},
+        {"aggressive", "0"},
+    };
+
+    for (const auto& [__key, __value] : optionsMap)
+    {
+        av_dict_set(&m_options, __key, __value, 0);
+    }
+}
+
+auto AvMedium::rtmpSetOptions() noexcept -> void
+{
+    std::vector<std::pair<const char*, const char*>> optionsMap{
+        {"rtmp_tcp_nodelay", "1"},  // RTMP专用，禁用Nagle算法，减少延迟
+        {"rtmp_buffer", "32768"},   // RTMP专用缓冲大小
+    };
+    for (const auto& [__key, __value] : optionsMap)
+    {
+        av_dict_set(&m_options, __key, __value, 0);
+    }
+}
+
+auto AvMedium::udpSetOptions() noexcept -> void
+{
+    std::vector<std::pair<const char*, const char*>> optionsMap{};
+    for (const auto& [__key, __value] : optionsMap)
+    {
+        av_dict_set(&m_options, __key, __value, 0);
+    }
+}
+
+auto AvMedium::avOpenInput() noexcept -> bool
+{
+    if (m_urlFormat == UrlFormat::RTSP || m_urlFormat == UrlFormat::RTMP || m_urlFormat == UrlFormat::UDP)
+    {
+        if (m_urlFormat == UrlFormat::RTSP)
+        {
+            this->rtspSetOptions();
+        }
+        else if (m_urlFormat == UrlFormat::RTMP)
+        {
+            this->rtmpSetOptions();
+        }
+        else if (m_urlFormat == UrlFormat::UDP)
+        {
+            this->udpSetOptions();
+        }
+        this->smuSetOptions();
+    }
+    if (avformat_open_input(&m_format_ctx, m_url.c_str(), nullptr, &m_options) < 0)
+    {
+        return false;
+    }
+    return true;
+}
+
+auto AvMedium::findVideoStream() noexcept -> bool
+{
+    if (avformat_find_stream_info(m_format_ctx, nullptr) < 0)
+    {
+        return false;
+    }
+    m_video_index = av_find_best_stream(m_format_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    if (m_video_index < 0)
+    {
+        return false;
+    }
+    return true;
+}
+
+auto AvMedium::initCodecContext() noexcept -> bool
+{
+    // 从视频流中提取编解码参数（如编码格式、分辨率、帧率等）
+    AVCodecParameters* codec_parameters{m_format_ctx->streams[m_video_index]->codecpar};
+    m_codec_ctx = avcodec_alloc_context3(nullptr);
+    if (!m_codec_ctx)
+    {
+        return false;
+    }
+    if (avcodec_parameters_to_context(m_codec_ctx, codec_parameters) < 0)
+    {
+        return false;
+    }
+    m_codec_ctx->codec_id     = AV_CODEC_ID_H264;  // 指定使用的编码器为 H.264
+    m_codec_ctx->thread_count = 8;                 // 设置编码时使用的线程数为 8
+    const AVCodec* codec{avcodec_find_decoder(codec_parameters->codec_id)};
+    if (!codec)
+    {
+        return false;
+    }
+    if (avcodec_open2(m_codec_ctx, codec, nullptr) < 0)
+    {
+        return false;
+    }
+    return true;
 }
 
 #define OPENCV
 // #define SDL2
 
 #ifdef OPENCV
+// SWS_BICUBIC 双三次插值
+// SWS_LANCZOS 高清图片
+// SWS_FAST_BILINEAR 低延迟低质量图片
 auto AvMedium::read() noexcept -> void
 {
     cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
@@ -99,6 +271,7 @@ finish:
     sws_freeContext(sws_ctx);
     cv::destroyAllWindows();
 }
+
 #endif
 
 #ifdef SDL2
@@ -239,183 +412,3 @@ auto AvMedium::read() noexcept -> void
     SDL_Quit();
 }
 #endif
-
-auto AvMedium::set_dict(std::string _url) noexcept -> AVDictionary*
-{
-    AVDictionary* __options{nullptr};
-    if (_url.find("rtsp://") == 0) [[likely]]
-    {
-        // 强制使用 TCP
-        av_dict_set(&__options, "rtsp_transport", "tcp", 0);
-
-        // 5秒超时
-        av_dict_set(&__options, "stimeout", "5000000", 0);
-
-        // 设置分析持续时间为较小的值（例如 1000000 微秒，即 1 秒）
-        av_dict_set(&__options, "analyzeduration", "1", 0);
-
-        // 设置探测大小为较小的值（例如 5000000 字节）
-        av_dict_set(&__options, "probesize", "300000", 0);
-
-        // 设置最大延迟（例如，100ms）
-        av_dict_set(&__options, "max_delay", "100", 0);
-
-        // 禁用内部缓冲，减少延迟
-        av_dict_set(&__options, "fflags", "ignidx+nobuffer+nofillin+discardcorrupt", 0);
-
-        // 选择 GPU 设备
-        // av_dict_set(&__options, "hwaccel", "cuda", 0);
-        // av_dict_set(&__options, "hwaccel_device", "0", 0);
-
-        // 延迟最低
-        av_dict_set(&__options, "flags", "low_delay", 0);
-
-        // 非阻塞模式
-        av_dict_set_int(&__options, "avioflags", AVIO_FLAG_NONBLOCK, 0);
-
-        // 控制为流索引（timestamp index）分配的最大内存1MB
-        av_dict_set(&__options, "indexmem", "1048576", 0);
-
-        // 启用 RTP MP4A-LATM Payload
-        av_dict_set(&__options, "latm", "1", 0);
-
-        // 降低帧率
-        // av_dict_set(&__options, "r", "30", 0);
-
-        // 帧丢弃（防止堵塞）
-        av_dict_set(&__options, "framedrop", "1", 0);
-
-        // 增加缓冲
-        av_dict_set(&__options, "buffer_size", "32768", 0);
-
-        // 断线重连
-        av_dict_set(&__options, "reconnect", "1", 0);
-
-        // 流结束后重连
-        av_dict_set(&__options, "reconnect_at_eof", "1", 0);
-
-        av_dict_set(&__options, "reconnect_streamed", "1", 0);
-        av_dict_set(&__options, "reconnect_delay_max", "5", 0);
-
-        av_dict_set(&__options, "err_detect", "none", 0);  // 禁用错误检测
-        av_dict_set(&__options, "crccheck", "0", 0);       // 禁用 CRC 校验
-        av_dict_set(&__options, "bitstream", "0", 0);      // 禁用比特流检测
-        av_dict_set(&__options, "buffer", "0", 0);         // 禁用比特流长度检测
-        av_dict_set(&__options, "explode", "0", 0);        // 禁用错误中止
-        av_dict_set(&__options, "careful", "0", 0);        // 禁用严格错误检测
-        av_dict_set(&__options, "compliant", "0", 0);      // 禁用规范性检查
-        av_dict_set(&__options, "aggressive", "0", 0);     // 禁用过度检查
-        // av_dict_set(&__options, "use_wallclock_as_timestamps", "0", 0);  // 禁用墙钟时间作为时间戳
-        av_dict_set(&__options, "skip_initial_bytes", "0", 0);  // 禁用跳过初始字节
-    }
-    else if (_url.find("rtmp://") == 0)
-    {
-        av_dict_set(&__options, "rtmp_tcp_nodelay", "1", 0);
-        av_dict_set(&__options, "rtmp_buffer", "32768", 0);
-        av_dict_set(&__options, "timeout", "5000000", 0);
-        av_dict_set(&__options, "fflags", "nobuffer+flush_packets", 0);
-        av_dict_set(&__options, "flags", "low_delay", 0);
-        av_dict_set(&__options, "reconnect", "1", 0);
-        av_dict_set(&__options, "reconnect_at_eof", "1", 0);
-        av_dict_set(&__options, "reconnect_delay_max", "5", 0);
-    }
-    else if (_url.find("http://") == 0 || _url.find("https://") == 0)
-    {
-        // 5秒超时
-        av_dict_set(&__options, "stimeout", "5000000", 0);
-        av_dict_set(&__options, "fflags", "nobuffer+flush_packets", 0);
-        av_dict_set(&__options, "flags", "low_delay", 0);
-        av_dict_set(&__options, "analyzeduration", "100000", 0);
-        av_dict_set(&__options, "probesize", "50000", 0);
-        av_dict_set(&__options, "reconnect", "1", 0);
-    }
-    // av_dict_set(&__options, "sync", "video", 0);
-    return __options;
-}
-
-auto AvMedium::av_init() noexcept -> bool
-{
-    AVDictionary* format_options{this->set_dict(m_url)};
-    if (!format_options)
-    {
-        spdlog::debug("The input address isn't live:{}", m_url);
-    }
-    if (avformat_open_input(&m_format_ctx, m_url.c_str(), nullptr, &format_options) < 0)
-    {
-        spdlog::error("The input address is invalid:{}", m_url);
-        return false;
-    }
-    av_dict_free(&format_options);
-
-    // av_log(nullptr, AV_LOG_DEBUG, "The input address is:%s\n", m_format_ctx->url);
-    spdlog::debug("The input address's format:{}", m_format_ctx->iformat->name);
-
-    // if (m_format_ctx->duration != AV_NOPTS_VALUE)
-    // {
-    //     std::cout << "Duration: " << (m_format_ctx->duration / 1e6) << " sec" << std::endl;
-    // }
-    // else
-    // {
-    //     std::cout << "Duration not available" << std::endl;
-    // }
-    if (avformat_find_stream_info(m_format_ctx, nullptr) < 0)
-    {
-        spdlog::error("Could not find stream:{}", m_format_ctx->nb_streams);
-        return false;
-    }
-
-    m_video_index = av_find_best_stream(m_format_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-    if (m_video_index < 0)
-    {
-        spdlog::error("Could not find video stream:{}", m_video_index);
-        return false;
-    }
-    // 从视频流中提取编解码参数（如编码格式、分辨率、帧率等）
-    AVCodecParameters* codec_parameters{m_format_ctx->streams[m_video_index]->codecpar};
-    // std::cout << codec_parameters->width << '\n';
-    // std::cout << codec_parameters->height << '\n';
-    // std::cout << static_cast<double>(codec_parameters->framerate.num) / codec_parameters->framerate.den << '\n';
-#if 1
-    m_codec_ctx = avcodec_alloc_context3(nullptr);
-    if (!m_codec_ctx)
-    {
-        spdlog::error("Could not allocate codec context");
-        return false;
-    }
-    // m_codec_ctx->codec_id      = AV_CODEC_ID_H264;      // 指定使用的编码器为 H.264
-    // m_codec_ctx->codec_type    = AVMEDIA_TYPE_VIDEO;    // 表示当前上下文是用于“视频”而非音频或字幕
-    m_codec_ctx->thread_count = 4;                // 设置编码时使用的线程数为 8
-    m_codec_ctx->thread_type  = FF_THREAD_FRAME;  // 表示当前上下文是用于“视频”而非音频或字幕
-    // m_codec_ctx->bit_rate      = 8000000;               // 设置目标码率为 8 Mbps
-    // const AVRational framerate = {30, 1};               // 定义帧率为 30fps
-    // m_codec_ctx->time_base     = av_inv_q(framerate);   // 每一帧之间的时间间隔是 1/30秒
-    // m_codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;  // 将一些编码器头信息（如 SPS、PPS）写到 extradata 中
-    // m_codec_ctx->flags2 |= AV_CODEC_FLAG_PASS2;         // 双通道编码的第二通
-
-    if (avcodec_parameters_to_context(m_codec_ctx, codec_parameters) < 0)
-    {
-        spdlog::error("Could not copy codec parameters to context");
-        return false;
-    }
-
-    const AVCodec* codec{avcodec_find_decoder(codec_parameters->codec_id)};
-    if (!codec)
-    {
-        spdlog::error("Could supported codec");
-        return false;
-    }
-    AVDictionary* opt = nullptr;
-    av_dict_set(&opt, "crf", "23", 0);
-    av_dict_set(&opt, "rc_mode", "CBR", 0);
-    av_dict_set(&opt, "preset", "medium", 0);
-    av_dict_set(&opt, "tune", "zerolatency", 0);
-    av_dict_set(&opt, "x264-params", "keyint=30:min-keyint=30;profile=high", 0);
-    if (avcodec_open2(m_codec_ctx, codec, &opt) < 0)
-    {
-        spdlog::error("Could not allocate codec context");
-        return false;
-    }
-    av_dict_free(&opt);
-#endif
-    return true;
-}
