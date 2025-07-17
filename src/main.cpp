@@ -4,8 +4,8 @@
 #include <opencv2/opencv.hpp>
 #include <thread>
 
-// #include "AvMedium.h"
-#include "AvPlayer.h"
+// #include "MediumFrame.h"
+#include "MediaPlayer.h"
 
 #if false
 void save_frame_seq(AVFrame* frame)
@@ -38,7 +38,7 @@ int main(int argc, char* argv[])
 #if false
     cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
 
-    AvMedium av{};
+    MediumFrame av{};
     av.setStreamUrl(R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)");
     av.mediumStart();
     auto gen = av.flushPacket();
@@ -65,7 +65,7 @@ int main(int argc, char* argv[])
     return 0;
 #endif
     QApplication app{argc, argv};
-    MediaPlay    mediaPlay{};
+    MediaPlayer  mediaPlay{};
     mediaPlay.show();
 
     QApplication::exec();

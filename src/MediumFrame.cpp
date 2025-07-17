@@ -1,4 +1,4 @@
-#include "AvMedium.h"
+#include "MediumFrame.h"
 
 #include <boost/url.hpp>
 
@@ -6,12 +6,18 @@ extern "C" {
 #include <libavutil/avutil.h>
 }
 
-AvMedium::AvMedium()
+MediumFrame::MediumFrame()
 {
     av_log_set_level(AV_LOG_WARNING);
 }
 
-AvMedium::~AvMedium() noexcept
+MediumFrame::MediumFrame(const std::string& _url) : m_url{_url}
+{
+    av_log_set_level(AV_LOG_WARNING);
+    std::invoke(&MediumFrame::setStreamUrl, this, m_url);
+}
+
+MediumFrame::~MediumFrame() noexcept
 {
     avcodec_free_context(&m_codecCtx);
     avformat_close_input(&m_formatCtx);
@@ -21,8 +27,12 @@ AvMedium::~AvMedium() noexcept
     sws_freeContext(m_swsCtx);
 }
 
-auto AvMedium::setStreamUrl(const std::string& _url) noexcept -> void
+auto MediumFrame::setStreamUrl(const std::string& _url) noexcept -> void
 {
+    if (m_url == _url) [[unlikely]]
+    {
+        return;
+    }
     m_url = _url;
     auto urlStr{boost::urls::parse_uri(m_url)};
     if (!urlStr.has_value())
@@ -47,23 +57,23 @@ auto AvMedium::setStreamUrl(const std::string& _url) noexcept -> void
     }
 }
 
-auto AvMedium::mediumStart() noexcept -> void
+auto MediumFrame::mediumStart() noexcept -> void
 {
-    if (!std::invoke(&AvMedium::avOpenInput, this))
+    if (!std::invoke(&MediumFrame::avOpenInput, this))
     {
         return;
     }
-    if (!std::invoke(&AvMedium::findVideoStream, this))
+    if (!std::invoke(&MediumFrame::findVideoStream, this))
     {
         return;
     }
-    if (!std::invoke(&AvMedium::initCodecContext, this))
+    if (!std::invoke(&MediumFrame::initCodecContext, this))
     {
         return;
     }
 }
 
-auto AvMedium::smuSetOptions() noexcept -> void
+auto MediumFrame::smuSetOptions() noexcept -> void
 {
     std::vector<std::pair<const char*, const char*>> optionsMap{
         {"buffer_size", "32768"},      // 网络缓冲大小，三协议均有效，UDP通常可适当调小
@@ -86,7 +96,7 @@ auto AvMedium::smuSetOptions() noexcept -> void
     }
 }
 
-auto AvMedium::rtspSetOptions() noexcept -> void
+auto MediumFrame::rtspSetOptions() noexcept -> void
 {
     std::vector<std::pair<const char*, const char*>> optionsMap{
         {"rtsp_transport", "tcp"},    // RTSP专用，指定传输协议
@@ -106,7 +116,7 @@ auto AvMedium::rtspSetOptions() noexcept -> void
     }
 }
 
-auto AvMedium::rtmpSetOptions() noexcept -> void
+auto MediumFrame::rtmpSetOptions() noexcept -> void
 {
     std::vector<std::pair<const char*, const char*>> optionsMap{
         {"rtmp_tcp_nodelay", "1"},  // RTMP专用，禁用Nagle算法，减少延迟
@@ -118,7 +128,7 @@ auto AvMedium::rtmpSetOptions() noexcept -> void
     }
 }
 
-auto AvMedium::udpSetOptions() noexcept -> void
+auto MediumFrame::udpSetOptions() noexcept -> void
 {
     std::vector<std::pair<const char*, const char*>> optionsMap{};
     for (const auto& [__key, __value] : optionsMap)
@@ -127,7 +137,7 @@ auto AvMedium::udpSetOptions() noexcept -> void
     }
 }
 
-auto AvMedium::avOpenInput() noexcept -> bool
+auto MediumFrame::avOpenInput() noexcept -> bool
 {
     if (m_urlFormat == UrlFormat::RTSP || m_urlFormat == UrlFormat::RTMP || m_urlFormat == UrlFormat::UDP)
     {
@@ -152,7 +162,7 @@ auto AvMedium::avOpenInput() noexcept -> bool
     return true;
 }
 
-auto AvMedium::findVideoStream() noexcept -> bool
+auto MediumFrame::findVideoStream() noexcept -> bool
 {
     if (avformat_find_stream_info(m_formatCtx, nullptr) < 0)
     {
@@ -166,7 +176,7 @@ auto AvMedium::findVideoStream() noexcept -> bool
     return true;
 }
 
-auto AvMedium::initCodecContext() noexcept -> bool
+auto MediumFrame::initCodecContext() noexcept -> bool
 {
     AVCodecParameters* codecParameters{m_formatCtx->streams[m_videoIndex]->codecpar};
     m_codecCtx = avcodec_alloc_context3(nullptr);
@@ -210,7 +220,7 @@ auto AvMedium::initCodecContext() noexcept -> bool
     return true;
 }
 
-auto AvMedium::flushPacket() noexcept -> AvMediumGenerator
+auto MediumFrame::flushPacket() noexcept -> MediumFrameGenerator
 {
     AVFrame* latestFrame{nullptr};
     while (av_read_frame(m_formatCtx, m_packet) >= 0)

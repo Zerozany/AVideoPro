@@ -1,51 +1,58 @@
-#include "AvPlayer.h"
+#include "MediaPlayer.h"
 
 #include <QPushButton>
 #include <QResizeEvent>
 #include <thread>
 
-MediaPlay::MediaPlay(QWidget* _parent) : QWidget{_parent}
+MediaPlayer::MediaPlayer(QWidget* _parent) : QWidget{_parent}
 {
-    std::invoke(&MediaPlay::initGraphics, this);
+    std::invoke(&MediaPlayer::initMediaPlayer, this);
+    std::invoke(&MediaPlayer::connectSignalToSlot, this);
 }
 
-auto MediaPlay::initGraphics() noexcept -> void
+auto MediaPlayer::getFramePix() const noexcept -> QPixmap
+{
+    return this->m_framePix;
+}
+
+auto MediaPlayer::setFramePix(const QPixmap& _pixmap) noexcept -> void
+{
+    m_framePix = _pixmap;
+    Q_EMIT this->framePixChanged(m_framePix);
+}
+
+auto MediaPlayer::initMediaPlayer() noexcept -> void
 {
     m_graphicsScene->setSceneRect(this->rect());
     m_graphicsScene->setBackgroundBrush(Qt::black);
     m_graphicsView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_graphicsView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_graphicsView->setContentsMargins(0, 0, 0, 0);
+    m_mainLayout->setContentsMargins(0, 0, 0, 0);
     m_mainLayout->addWidget(m_graphicsView);
-    m_graphicsPixmapItem->setPos(0, 0);
-    m_originalPixmap = QPixmap{R"(C:\Users\ZZY99\Desktop\AVSources\destoke.png)"};
-    //----
-    QPushButton* btn{new QPushButton{"ssss", this}};
-    btn->setGeometry(50, 50, 200, 40);
-    btn->setStyleSheet(R"(
-        QPushButton {
-            background-color: rgba(0, 0, 0, 0);  /* 完全透明背景 */
-            color: rgba(0, 0, 0, 0);             /* 文字透明 */
-            border: none;                       /* 无边框 */
-        }
-        QPushButton:hover {
-            background-color: rgba(0, 0, 0, 0);  /* 仍然透明背景 */
-            color: white;                       /* 显示白色文字 */
-            border: 1px solid #2980b9;          /* 显示边框 */
-        }
-        QPushButton:pressed {
-            background-color: rgba(200, 200, 200, 80); /* 点击时浅灰背景，80为透明度 */
-        }
-    )");
-
-    // 初次缩放
     m_graphicsScene->addItem(m_graphicsPixmapItem);
-    QPixmap scaled = m_originalPixmap.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    m_graphicsPixmapItem->setPixmap(scaled);
-    connect(this, &MediaPlay::pixmapChanged, this, &MediaPlay::onPixmapChanged);
+    m_graphicsPixmapItem->setPos(0, 0);
+
     av->setStreamUrl(R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)");
     av->mediumStart();
+    //----
+    // QPushButton* btn{new QPushButton{"ssss", this}};
+    // btn->setGeometry(50, 50, 200, 40);
+    // btn->setStyleSheet(R"(
+    //     QPushButton {
+    //         background-color: rgba(0, 0, 0, 0);  /* 完全透明背景 */
+    //         color: rgba(0, 0, 0, 0);             /* 文字透明 */
+    //         border: none;                       /* 无边框 */
+    //     }
+    //     QPushButton:hover {
+    //         background-color: rgba(0, 0, 0, 0);  /* 仍然透明背景 */
+    //         color: white;                       /* 显示白色文字 */
+    //         border: 1px solid #2980b9;          /* 显示边框 */
+    //     }
+    //     QPushButton:pressed {
+    //         background-color: rgba(200, 200, 200, 80); /* 点击时浅灰背景，80为透明度 */
+    //     }
+    // )");
 
     std::thread{[this]() {
         auto gen = av->flushPacket();
@@ -90,10 +97,12 @@ auto MediaPlay::initGraphics() noexcept -> void
             // 直接用buffer构造QImage，不拷贝内存，避免性能损失
             QImage  image(buffer, width, height, dstLinesize[0], QImage::Format_RGBA8888);
             QPixmap pixmap = QPixmap::fromImage(image.copy());  // 这里copy是为了安全，避免线程问题
-
-            emit pixmapChanged(pixmap);
+            if (pixmap.isNull())
+            {
+                continue;
+            }
+            this->setFramePix(pixmap);
         }
-
         if (swsCtx)
             sws_freeContext(swsCtx);
         if (buffer)
@@ -103,21 +112,28 @@ auto MediaPlay::initGraphics() noexcept -> void
     m_graphicsView->show();
 }
 
-void MediaPlay::resizeEvent(QResizeEvent* event)
+auto MediaPlayer::connectSignalToSlot() noexcept -> void
 {
-    m_graphicsScene->setSceneRect(this->rect());
-    // m_graphicsVideoItem->setPos(0, 0);
-    // m_graphicsVideoItem->setSize(this->size());
-    QPixmap scaled = m_originalPixmap.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    m_graphicsPixmapItem->setPixmap(scaled);
-
-    QWidget::resizeEvent(event);
+    connect(this, &MediaPlayer::framePixChanged, this, &MediaPlayer::onFramePixChanged);
 }
 
-void MediaPlay::onPixmapChanged(QPixmap _pixmap)
+void MediaPlayer::resizeEvent(QResizeEvent* _event)
 {
-    m_originalPixmap = _pixmap;
-    QPixmap scaled   = m_originalPixmap.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    m_graphicsScene->setSceneRect(this->rect());
+    if (m_framePix.isNull())
+    {
+        return;
+    }
+    QPixmap scaled = m_framePix.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    m_graphicsPixmapItem->setPixmap(scaled);
+
+    QWidget::resizeEvent(_event);
+}
+
+void MediaPlayer::onFramePixChanged(QPixmap _pixmap)
+{
+    m_framePix     = _pixmap;
+    QPixmap scaled = m_framePix.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     m_graphicsPixmapItem->setPixmap(scaled);
 }
 

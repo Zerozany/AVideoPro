@@ -9,13 +9,13 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-struct AvMediumGenerator
+struct MediumFrameGenerator
 {
     struct promise_type
     {
-        auto get_return_object() -> AvMediumGenerator
+        auto get_return_object() -> MediumFrameGenerator
         {
-            return AvMediumGenerator{std::coroutine_handle<promise_type>::from_promise(*this)};
+            return MediumFrameGenerator{std::coroutine_handle<promise_type>::from_promise(*this)};
         }
         auto initial_suspend() noexcept -> std::suspend_always { return {}; }
         auto final_suspend() noexcept -> std::suspend_always { return {}; }
@@ -32,8 +32,8 @@ struct AvMediumGenerator
 
     std::coroutine_handle<promise_type> m_handle;
 
-    explicit(true) AvMediumGenerator(std::coroutine_handle<promise_type> _handle) : m_handle(_handle) {}
-    ~AvMediumGenerator()
+    explicit(true) MediumFrameGenerator(std::coroutine_handle<promise_type> _handle) : m_handle(_handle) {}
+    ~MediumFrameGenerator()
     {
         if (m_handle)
         {
@@ -57,7 +57,7 @@ struct AvMediumGenerator
     }
 };
 
-class AvMedium
+class MediumFrame
 {
 public:
     enum struct UrlFormat
@@ -69,15 +69,16 @@ public:
     };
 
 public:
-    explicit(true) AvMedium();
-    ~AvMedium() noexcept;
+    explicit(true) MediumFrame();
+    explicit(true) MediumFrame(const std::string& _url);
+    ~MediumFrame() noexcept;
 
 public:
-    auto flushPacket() noexcept -> AvMediumGenerator;
-
     auto setStreamUrl(const std::string& _url) noexcept -> void;
 
     auto mediumStart() noexcept -> void;
+
+    auto flushPacket() noexcept -> MediumFrameGenerator;
 
 private:
     auto smuSetOptions() noexcept -> void;
