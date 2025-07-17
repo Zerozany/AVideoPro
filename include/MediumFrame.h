@@ -1,4 +1,5 @@
 _Pragma("once");
+#include <QObject>
 #include <coroutine>
 #include <exception>
 #include <string>
@@ -57,8 +58,11 @@ struct MediumFrameGenerator
     }
 };
 
-class MediumFrame
+class MediumFrame : public QObject
 {
+    Q_OBJECT
+    Q_PROPERTY(std::string url READ getUrl WRITE setUrl NOTIFY urlChanged)
+    Q_PROPERTY(UrlFormat urlFormat READ getUrlFormat WRITE setUrlFormat NOTIFY urlFormatChanged)
 public:
     enum struct UrlFormat
     {
@@ -67,33 +71,46 @@ public:
         RTMP  = 0x02,
         UDP   = 0x03,
     };
+    Q_ENUM(UrlFormat)
 
 public:
-    explicit(true) MediumFrame();
-    explicit(true) MediumFrame(const std::string& _url);
+    explicit(true) MediumFrame(QObject* _parent = nullptr);
+    explicit(true) MediumFrame(const std::string& _url, QObject* _parent = nullptr);
     ~MediumFrame() noexcept;
 
 public:
-    auto setStreamUrl(const std::string& _url) noexcept -> void;
+    auto getUrl() const noexcept -> std::string;
+    auto setUrl(const std::string& _url) noexcept -> void;
+
+    auto getUrlFormat() const noexcept -> UrlFormat;
+    auto setUrlFormat(const UrlFormat& _urlFormat) noexcept -> void;
+
+public:
+    auto flushPacket() noexcept -> MediumFrameGenerator;
 
     auto mediumStart() noexcept -> void;
 
-    auto flushPacket() noexcept -> MediumFrameGenerator;
+    auto getFrameState() noexcept -> bool;
 
 private:
-    auto smuSetOptions() noexcept -> void;
+    auto connectSignalToSlot() noexcept -> void;
 
-    auto rtspSetOptions() noexcept -> void;
-
-    auto rtmpSetOptions() noexcept -> void;
-
-    auto udpSetOptions() noexcept -> void;
-
+private:
     auto avOpenInput() noexcept -> bool;
 
     auto findVideoStream() noexcept -> bool;
 
     auto initCodecContext() noexcept -> bool;
+
+Q_SIGNALS:
+    void urlChanged();
+
+    void urlFormatChanged();
+
+private Q_SLOTS:
+    void onUrlChanged();
+
+    void onUrlFormatChanged();
 
 private:
     std::string      m_url{};
@@ -105,4 +122,5 @@ private:
     SwsContext*      m_swsCtx{nullptr};
     AVPacket*        m_packet{av_packet_alloc()};
     AVFrame*         m_frame{av_frame_alloc()};
+    bool             m_frameHandle{false};
 };

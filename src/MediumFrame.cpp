@@ -1,159 +1,104 @@
 #include "MediumFrame.h"
 
+#include <spdlog/spdlog.h>
+
 #include <boost/url.hpp>
 
 extern "C" {
 #include <libavutil/avutil.h>
 }
 
-MediumFrame::MediumFrame()
+MediumFrame::MediumFrame(QObject* _parent) : QObject{_parent}
 {
     av_log_set_level(AV_LOG_WARNING);
+    std::invoke(&MediumFrame::connectSignalToSlot, this);
 }
 
-MediumFrame::MediumFrame(const std::string& _url) : m_url{_url}
+MediumFrame::MediumFrame(const std::string& _url, QObject* _parent)
+    : QObject{_parent}, m_url{_url}
 {
     av_log_set_level(AV_LOG_WARNING);
-    std::invoke(&MediumFrame::setStreamUrl, this, m_url);
+    std::invoke(&MediumFrame::connectSignalToSlot, this);
+    this->setUrl(m_url);
 }
 
 MediumFrame::~MediumFrame() noexcept
 {
-    avcodec_free_context(&m_codecCtx);
     avformat_close_input(&m_formatCtx);
+    avcodec_free_context(&m_codecCtx);
     av_packet_free(&m_packet);
     av_frame_free(&m_frame);
-    av_dict_free(&m_options);
     sws_freeContext(m_swsCtx);
+    av_dict_free(&m_options);
 }
 
-auto MediumFrame::setStreamUrl(const std::string& _url) noexcept -> void
+auto MediumFrame::getUrl() const noexcept -> std::string
 {
-    if (m_url == _url) [[unlikely]]
+    return this->m_url;
+}
+
+auto MediumFrame::setUrl(const std::string& _url) noexcept -> void
+{
+    if (m_url == _url)
     {
         return;
     }
     m_url = _url;
-    auto urlStr{boost::urls::parse_uri(m_url)};
-    if (!urlStr.has_value())
+    Q_EMIT this->urlChanged();
+}
+
+auto MediumFrame::getUrlFormat() const noexcept -> UrlFormat
+{
+    return this->m_urlFormat;
+}
+
+auto MediumFrame::setUrlFormat(const UrlFormat& _urlFormat) noexcept -> void
+{
+    if (m_urlFormat == _urlFormat)
     {
         return;
     }
-    if (std::string{urlStr.value().scheme()} == std::string{"rtsp"})
-    {
-        m_urlFormat = UrlFormat::RTSP;
-    }
-    else if (std::string{urlStr.value().scheme()} == std::string{"rtmp"})
-    {
-        m_urlFormat = UrlFormat::RTMP;
-    }
-    else if (std::string{urlStr.value().scheme()} == std::string{"udp"})
-    {
-        m_urlFormat = UrlFormat::UDP;
-    }
-    else
-    {
-        m_urlFormat = UrlFormat::OTHER;
-    }
+    m_urlFormat = _urlFormat;
+    Q_EMIT this->onUrlChanged();
+}
+
+auto MediumFrame::connectSignalToSlot() noexcept -> void
+{
+    connect(this, &MediumFrame::urlChanged, this, &MediumFrame::onUrlChanged);
+    connect(this, &MediumFrame::urlFormatChanged, this, &MediumFrame::onUrlFormatChanged);
 }
 
 auto MediumFrame::mediumStart() noexcept -> void
 {
     if (!std::invoke(&MediumFrame::avOpenInput, this))
     {
+        spdlog::error("AVFormat open input error");
         return;
     }
     if (!std::invoke(&MediumFrame::findVideoStream, this))
     {
+        spdlog::error("AVFormat find stream infomation error");
         return;
     }
     if (!std::invoke(&MediumFrame::initCodecContext, this))
     {
+        spdlog::error("AVideo Codec context error");
         return;
     }
+    m_frameHandle = true;
+    spdlog::info("Media live streaming has been activated");
 }
 
-auto MediumFrame::smuSetOptions() noexcept -> void
+auto MediumFrame::getFrameState() noexcept -> bool
 {
-    std::vector<std::pair<const char*, const char*>> optionsMap{
-        {"buffer_size", "32768"},      // 网络缓冲大小，三协议均有效，UDP通常可适当调小
-        {"stimeout", "5000000"},       // 网络连接和读超时（微秒）
-        {"fflags", "nobuffer"},        // 禁用内部缓冲，减少延迟
-        {"flush_packets", "1"},        // 每包立即处理，减少延迟
-        {"analyzeduration", "0"},      // 禁止流分析，快速启动
-        {"framedrop", "1"},            // 丢帧防止阻塞，实时性关键
-        {"reconnect", "1"},            // 断线自动重连
-        {"reconnect_at_eof", "1"},     // 流结束自动重连
-        {"reconnect_streamed", "1"},   // 指定网络流
-        {"reconnect_delay_max", "5"},  // 最大重连间隔秒
-        {"avioflags", "8"},            // 非阻塞IO
-        {"flags", "low_delay"},        // 编解码低延迟标志
-
-    };
-    for (const auto& [__key, __value] : optionsMap)
-    {
-        av_dict_set(&m_options, __key, __value, 0);
-    }
-}
-
-auto MediumFrame::rtspSetOptions() noexcept -> void
-{
-    std::vector<std::pair<const char*, const char*>> optionsMap{
-        {"rtsp_transport", "tcp"},    // RTSP专用，指定传输协议
-        {"reorder_queue_size", "0"},  // 禁用帧重排序，RTSP流中B帧多时有效
-        {"seekable", "0"},            // 禁用seek，直播流常用
-        {"err_detect", "none"},       // 错误检测关闭，容错性强
-        {"explode", "0"},
-        {"buffer", "0"},
-        {"careful", "0"},
-        {"compliant", "0"},
-        {"aggressive", "0"},
-    };
-
-    for (const auto& [__key, __value] : optionsMap)
-    {
-        av_dict_set(&m_options, __key, __value, 0);
-    }
-}
-
-auto MediumFrame::rtmpSetOptions() noexcept -> void
-{
-    std::vector<std::pair<const char*, const char*>> optionsMap{
-        {"rtmp_tcp_nodelay", "1"},  // RTMP专用，禁用Nagle算法，减少延迟
-        {"rtmp_buffer", "32768"},   // RTMP专用缓冲大小
-    };
-    for (const auto& [__key, __value] : optionsMap)
-    {
-        av_dict_set(&m_options, __key, __value, 0);
-    }
-}
-
-auto MediumFrame::udpSetOptions() noexcept -> void
-{
-    std::vector<std::pair<const char*, const char*>> optionsMap{};
-    for (const auto& [__key, __value] : optionsMap)
-    {
-        av_dict_set(&m_options, __key, __value, 0);
-    }
+    return this->m_frameHandle;
 }
 
 auto MediumFrame::avOpenInput() noexcept -> bool
 {
-    if (m_urlFormat == UrlFormat::RTSP || m_urlFormat == UrlFormat::RTMP || m_urlFormat == UrlFormat::UDP)
+    if (m_formatCtx)
     {
-        if (m_urlFormat == UrlFormat::RTSP)
-        {
-            this->rtspSetOptions();
-        }
-        else if (m_urlFormat == UrlFormat::RTMP)
-        {
-            this->rtmpSetOptions();
-        }
-        else if (m_urlFormat == UrlFormat::UDP)
-        {
-            this->udpSetOptions();
-        }
-        this->smuSetOptions();
+        avformat_close_input(&m_formatCtx);
     }
     if (avformat_open_input(&m_formatCtx, m_url.c_str(), nullptr, &m_options) < 0)
     {
@@ -206,6 +151,10 @@ auto MediumFrame::initCodecContext() noexcept -> bool
     {
         return false;
     }
+    if (m_swsCtx)
+    {
+        sws_freeContext(m_swsCtx);
+    }
     m_swsCtx = sws_getContext(
         srcW, srcH, srcFmt,
         srcW, srcH, AV_PIX_FMT_BGR24,
@@ -220,10 +169,106 @@ auto MediumFrame::initCodecContext() noexcept -> bool
     return true;
 }
 
+void MediumFrame::onUrlChanged()
+{
+    m_frameHandle = false;
+    auto urlStr{boost::urls::parse_uri(m_url)};
+    if (!urlStr.has_value())
+    {
+        return;
+    }
+    if (std::string{urlStr.value().scheme()} == std::string{"rtsp"})
+    {
+        m_urlFormat = UrlFormat::RTSP;
+    }
+    else if (std::string{urlStr.value().scheme()} == std::string{"rtmp"})
+    {
+        m_urlFormat = UrlFormat::RTMP;
+    }
+    else if (std::string{urlStr.value().scheme()} == std::string{"udp"})
+    {
+        m_urlFormat = UrlFormat::UDP;
+    }
+    else
+    {
+        m_urlFormat = UrlFormat::OTHER;
+    }
+}
+
+void MediumFrame::onUrlFormatChanged()
+{
+    std::map<const char*, const char*> smuOptionsMap{
+        {"buffer_size", "32768"},      // 网络缓冲大小，三协议均有效，UDP通常可适当调小
+        {"stimeout", "5000000"},       // 网络连接和读超时（微秒）
+        {"fflags", "nobuffer"},        // 禁用内部缓冲，减少延迟
+        {"flush_packets", "1"},        // 每包立即处理，减少延迟
+        {"analyzeduration", "0"},      // 禁止流分析，快速启动
+        {"framedrop", "1"},            // 丢帧防止阻塞，实时性关键
+        {"reconnect", "1"},            // 断线自动重连
+        {"reconnect_at_eof", "1"},     // 流结束自动重连
+        {"reconnect_streamed", "1"},   // 指定网络流
+        {"reconnect_delay_max", "5"},  // 最大重连间隔秒
+        {"avioflags", "8"},            // 非阻塞IO
+        {"flags", "low_delay"},        // 编解码低延迟标志
+
+    };
+
+    std::map<const char*, const char*> rtspOptionsMap{
+        {"buffer_size", "32768"},      // 网络缓冲大小，三协议均有效，UDP通常可适当调小
+        {"stimeout", "5000000"},       // 网络连接和读超时（微秒）
+        {"fflags", "nobuffer"},        // 禁用内部缓冲，减少延迟
+        {"flush_packets", "1"},        // 每包立即处理，减少延迟
+        {"analyzeduration", "0"},      // 禁止流分析，快速启动
+        {"framedrop", "1"},            // 丢帧防止阻塞，实时性关键
+        {"reconnect", "1"},            // 断线自动重连
+        {"reconnect_at_eof", "1"},     // 流结束自动重连
+        {"reconnect_streamed", "1"},   // 指定网络流
+        {"reconnect_delay_max", "5"},  // 最大重连间隔秒
+        {"avioflags", "8"},            // 非阻塞IO
+        {"flags", "low_delay"},        // 编解码低延迟标志
+    };
+
+    std::map<const char*, const char*> rtmpOptionsMap{
+        {"rtmp_tcp_nodelay", "1"},  // RTMP专用，禁用Nagle算法，减少延迟
+        {"rtmp_buffer", "32768"},   // RTMP专用缓冲大小
+    };
+
+    std::map<const char*, const char*> udpOptionsMap{};
+
+    auto setOptions{[this](const std::map<const char*, const char*>& _map) {
+        if (m_options)
+        {
+            av_dict_free(&m_options);
+        }
+        for (const auto& [__key, __value] : _map)
+        {
+            av_dict_set(&m_options, __key, __value, 0);
+        }
+    }};
+
+    m_frameHandle = false;
+    if (m_urlFormat == UrlFormat::RTSP || m_urlFormat == UrlFormat::RTMP || m_urlFormat == UrlFormat::UDP)
+    {
+        std::invoke(setOptions, smuOptionsMap);
+        if (m_urlFormat == UrlFormat::RTSP)
+        {
+            std::invoke(setOptions, rtspOptionsMap);
+        }
+        else if (m_urlFormat == UrlFormat::RTMP)
+        {
+            std::invoke(setOptions, rtmpOptionsMap);
+        }
+        else if (m_urlFormat == UrlFormat::UDP)
+        {
+            std::invoke(setOptions, udpOptionsMap);
+        }
+    }
+}
+
 auto MediumFrame::flushPacket() noexcept -> MediumFrameGenerator
 {
     AVFrame* latestFrame{nullptr};
-    while (av_read_frame(m_formatCtx, m_packet) >= 0)
+    while (av_read_frame(m_formatCtx, m_packet) >= 0 && m_frameHandle)
     {
         if (m_packet->stream_index != m_videoIndex)
         {

@@ -21,6 +21,11 @@ public:
     ~MediaPlayer() noexcept = default;
 
 public:
+    auto play() noexcept -> void;
+
+    auto setUrl(const std::string& _url) noexcept -> void;
+
+private:
     auto getFramePix() const noexcept -> QPixmap;
     auto setFramePix(const QPixmap& _pixmap) noexcept -> void;
 
@@ -44,7 +49,5 @@ private:
     MediaView*           m_graphicsView{new MediaView{m_graphicsScene}};
     QGraphicsPixmapItem* m_graphicsPixmapItem{new QGraphicsPixmapItem{}};
     QPixmap              m_framePix{};
-    MediumFrame*         av{new MediumFrame{}};
+    MediumFrame*         m_mediumFrame{new MediumFrame{}};
 };
-
-QPixmap avframeToQPixmap(AVFrame* frame, int width, int height, SwsContext* swsCtx);

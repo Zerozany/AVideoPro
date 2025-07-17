@@ -1,5 +1,7 @@
 #include "MediaPlayer.h"
 
+#include <spdlog/spdlog.h>
+
 #include <QPushButton>
 #include <QResizeEvent>
 #include <thread>
@@ -8,6 +10,72 @@ MediaPlayer::MediaPlayer(QWidget* _parent) : QWidget{_parent}
 {
     std::invoke(&MediaPlayer::initMediaPlayer, this);
     std::invoke(&MediaPlayer::connectSignalToSlot, this);
+}
+
+auto MediaPlayer::play() noexcept -> void
+{
+    if (!m_mediumFrame->getFrameState())
+    {
+        spdlog::error("Live streaming address resolution failed or is invalid");
+        return;
+    }
+    std::thread{[this] {
+        auto        gen{m_mediumFrame->flushPacket()};
+        SwsContext* swsCtx{nullptr};
+        uint8_t*    buffer{nullptr};
+        int         bufSize{};
+        while (gen.next() && m_mediumFrame->getFrameState())
+        {
+            AVFrame*      frame{gen.current()};
+            int           width{frame->width};
+            int           height{frame->height};
+            AVPixelFormat srcFormat{static_cast<AVPixelFormat>(frame->format)};
+            // 如果swsCtx还没创建，或者分辨率改变，重新创建swsCtx和buffer
+            if (!swsCtx || bufSize != width * height * 4)
+            {
+                if (swsCtx)
+                {
+                    sws_freeContext(swsCtx);
+                }
+                if (buffer)
+                {
+                    av_free(buffer);
+                }
+                swsCtx = sws_getContext(
+                    width, height, srcFormat,
+                    width, height, AV_PIX_FMT_RGBA,
+                    SWS_BILINEAR,
+                    nullptr, nullptr, nullptr);
+                bufSize = av_image_get_buffer_size(AV_PIX_FMT_RGBA, width, height, 1);
+                buffer  = (uint8_t*)av_malloc(bufSize);
+            }
+            uint8_t* dstData[4]{buffer, nullptr, nullptr, nullptr};
+            int      dstLinesize[4]{4 * width, 0, 0, 0};
+            sws_scale(swsCtx, frame->data, frame->linesize, 0, height, dstData, dstLinesize);
+            // 直接用buffer构造QImage，不拷贝内存，避免性能损失
+            QImage  image{buffer, width, height, dstLinesize[0], QImage::Format_RGBA8888};
+            QPixmap pixmap{QPixmap::fromImage(image.copy())};
+            if (pixmap.isNull())
+            {
+                continue;
+            }
+            this->setFramePix(pixmap);
+        }
+        if (swsCtx)
+        {
+            sws_freeContext(swsCtx);
+        }
+        if (buffer)
+        {
+            av_free(buffer);
+        }
+    }}.detach();
+}
+
+auto MediaPlayer::setUrl(const std::string& _url) noexcept -> void
+{
+    m_mediumFrame->setUrl(_url);
+    m_mediumFrame->mediumStart();
 }
 
 auto MediaPlayer::getFramePix() const noexcept -> QPixmap
@@ -32,9 +100,8 @@ auto MediaPlayer::initMediaPlayer() noexcept -> void
     m_mainLayout->addWidget(m_graphicsView);
     m_graphicsScene->addItem(m_graphicsPixmapItem);
     m_graphicsPixmapItem->setPos(0, 0);
+    m_graphicsView->show();
 
-    av->setStreamUrl(R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)");
-    av->mediumStart();
     //----
     // QPushButton* btn{new QPushButton{"ssss", this}};
     // btn->setGeometry(50, 50, 200, 40);
@@ -53,63 +120,9 @@ auto MediaPlayer::initMediaPlayer() noexcept -> void
     //         background-color: rgba(200, 200, 200, 80); /* 点击时浅灰背景，80为透明度 */
     //     }
     // )");
-
-    std::thread{[this]() {
-        auto gen = av->flushPacket();
-
-        SwsContext* swsCtx  = nullptr;
-        uint8_t*    buffer  = nullptr;
-        int         bufSize = 0;
-
-        while (gen.next())
-        {
-            AVFrame*      frame     = gen.current();
-            int           width     = frame->width;
-            int           height    = frame->height;
-            AVPixelFormat srcFormat = static_cast<AVPixelFormat>(frame->format);
-
-            // 如果swsCtx还没创建，或者分辨率改变，重新创建swsCtx和buffer
-            if (!swsCtx || bufSize != width * height * 4)
-            {
-                if (swsCtx)
-                    sws_freeContext(swsCtx);
-                if (buffer)
-                    av_free(buffer);
-
-                swsCtx = sws_getContext(
-                    width, height, srcFormat,
-                    width, height, AV_PIX_FMT_RGBA,
-                    SWS_BILINEAR,
-                    nullptr, nullptr, nullptr);
-
-                bufSize = av_image_get_buffer_size(AV_PIX_FMT_RGBA, width, height, 1);
-                buffer  = (uint8_t*)av_malloc(bufSize);
-            }
-
-            uint8_t* dstData[4]     = {buffer, nullptr, nullptr, nullptr};
-            int      dstLinesize[4] = {4 * width, 0, 0, 0};
-
-            sws_scale(swsCtx,
-                      frame->data, frame->linesize,
-                      0, height,
-                      dstData, dstLinesize);
-
-            // 直接用buffer构造QImage，不拷贝内存，避免性能损失
-            QImage  image(buffer, width, height, dstLinesize[0], QImage::Format_RGBA8888);
-            QPixmap pixmap = QPixmap::fromImage(image.copy());  // 这里copy是为了安全，避免线程问题
-            if (pixmap.isNull())
-            {
-                continue;
-            }
-            this->setFramePix(pixmap);
-        }
-        if (swsCtx)
-            sws_freeContext(swsCtx);
-        if (buffer)
-            av_free(buffer);
-    }}.detach();
-
-    m_graphicsView->show();
+    // connect(btn, &QPushButton::clicked, this, [this] {
+    //     setUrl(std::string{R"(rtmp://ns8.indexforce.com/home/mystream)"});
+    // });
 }
 
 auto MediaPlayer::connectSignalToSlot() noexcept -> void
@@ -135,31 +148,4 @@ void MediaPlayer::onFramePixChanged(QPixmap _pixmap)
     m_framePix     = _pixmap;
     QPixmap scaled = m_framePix.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     m_graphicsPixmapItem->setPixmap(scaled);
-}
-
-QPixmap avframeToQPixmap(AVFrame* frame, int width, int height, SwsContext* swsCtx)
-{
-    // 分配 RGB/RGBA Frame
-    AVFrame* rgbFrame = av_frame_alloc();
-    int      numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGBA, width, height, 1);
-    uint8_t* buffer   = (uint8_t*)av_malloc(numBytes);
-    av_image_fill_arrays(rgbFrame->data, rgbFrame->linesize, buffer,
-                         AV_PIX_FMT_RGBA, width, height, 1);
-
-    // 执行转换
-    sws_scale(swsCtx, frame->data, frame->linesize, 0, height,
-              rgbFrame->data, rgbFrame->linesize);
-
-    // 用转换后的数据构建 QImage（不拷贝内存）
-    QImage image(rgbFrame->data[0], width, height, rgbFrame->linesize[0],
-                 QImage::Format_RGBA8888);
-
-    // 为避免 buffer 被释放，执行拷贝构造
-    QPixmap pixmap = QPixmap::fromImage(image.copy());
-
-    // 清理内存
-    av_free(buffer);
-    av_frame_free(&rgbFrame);
-
-    return pixmap;
 }

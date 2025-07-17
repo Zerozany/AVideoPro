@@ -38,10 +38,10 @@ int main(int argc, char* argv[])
 #if false
     cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
 
-    MediumFrame av{};
-    av.setStreamUrl(R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)");
-    av.mediumStart();
-    auto gen = av.flushPacket();
+    MediumFrame m_mediumFrame{};
+    m_mediumFrame.setStreamUrl(R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)");
+    m_mediumFrame.mediumStart();
+    auto gen = m_mediumFrame.flushPacket();
 #elif false
     while (gen.next())
     {
@@ -66,8 +66,10 @@ int main(int argc, char* argv[])
 #endif
     QApplication app{argc, argv};
     MediaPlayer  mediaPlay{};
+    mediaPlay.resize(1280, 720);
     mediaPlay.show();
-
+    mediaPlay.setUrl(R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)");
+    mediaPlay.play();
     QApplication::exec();
 }
 
