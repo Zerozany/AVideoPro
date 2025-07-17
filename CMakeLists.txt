@@ -8,6 +8,21 @@ find_package(FFMPEG REQUIRED)
 find_package(boost_url CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(QT NAMES Qt6 Qt5 REQUIRED
+    COMPONENTS
+    Widgets
+    Core
+    Multimedia
+    MultimediaWidgets
+)
+
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED
+    COMPONENTS
+    Widgets
+    Core
+    Multimedia
+    MultimediaWidgets
+)
 
 if(MSVC)
     add_compile_options(/utf-8 /Zc:preprocessor) # 仅对 MSVC 生效
@@ -16,6 +31,16 @@ else()
 endif()
 
 add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    AUTOUIC ON
+    AUTOMOC ON
+    AUTORCC ON
+)
+
+if(QT_VERSION_MAJOR EQUAL 6)
+    qt_finalize_executable(${PROJECT_NAME})
+endif()
 
 file(GLOB SOURCE_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h
@@ -49,4 +74,13 @@ target_link_libraries(${PROJECT_NAME}
     Boost::url
     ${FFMPEG_LIBRARIES}
     ${OpenCV_LIBS}
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Core
+    Qt${QT_VERSION_MAJOR}::Multimedia
+    Qt${QT_VERSION_MAJOR}::MultimediaWidgets
+)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    MACOSX_BUNDLE TRUE
+    WIN32_EXECUTABLE FALSE
 )

@@ -1,13 +1,17 @@
+#include <QApplication>
+#include <QPixmap>
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include <thread>
 
-#include "AvMedium.h"
+// #include "AvMedium.h"
+#include "AvPlayer.h"
 
+#if false
 void save_frame_seq(AVFrame* frame)
 {
-    static SwsContext* sws_ctx = nullptr;
-    static cv::Mat     img_bgr;
+    static SwsContext* sws_ctx{nullptr};
+    static cv::Mat     img_bgr{};
     if (!sws_ctx)
     {
         sws_ctx = sws_getContext(
@@ -17,8 +21,8 @@ void save_frame_seq(AVFrame* frame)
 
         img_bgr = cv::Mat(frame->height, frame->width, CV_8UC3);
     }
-    uint8_t* dst_data[1]     = {img_bgr.data};
-    int      dst_linesize[1] = {static_cast<int>(img_bgr.step[0])};
+    uint8_t* dst_data[1]{img_bgr.data};
+    int      dst_linesize[1]{static_cast<int>(img_bgr.step[0])};
     sws_scale(sws_ctx, frame->data, frame->linesize, 0, frame->height, dst_data, dst_linesize);
     cv::imshow("Video", img_bgr);
     if (cv::waitKey(1) == 27)
@@ -27,22 +31,24 @@ void save_frame_seq(AVFrame* frame)
         exit(0);
     }
 }
+#endif
 
-int main(int /*argc*/, char const* /*argv*/[])
+int main(int argc, char* argv[])
 {
+#if false
     cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
 
     AvMedium av{};
     av.setStreamUrl(R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)");
     av.mediumStart();
     auto gen = av.flushPacket();
-#if false
+#elif false
     while (gen.next())
     {
         AVFrame* frame = gen.current();
         save_frame_seq(frame);
     }
-#elif true
+#elif false
     std::thread{
         [&gen]() {
             while (gen.next())
@@ -56,8 +62,13 @@ int main(int /*argc*/, char const* /*argv*/[])
     {
         std::cout << "....\n";
     }
-#endif
     return 0;
+#endif
+    QApplication app{argc, argv};
+    MediaPlay    mediaPlay{};
+    mediaPlay.show();
+
+    QApplication::exec();
 }
 
 // rtmp://ns8.indexforce.com/home/mystream  伊拉克直播电视台
