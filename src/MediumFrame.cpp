@@ -24,12 +24,7 @@ MediumFrame::MediumFrame(const std::string& _url, QObject* _parent)
 
 MediumFrame::~MediumFrame() noexcept
 {
-    avformat_close_input(&m_formatCtx);
-    avcodec_free_context(&m_codecCtx);
-    av_packet_free(&m_packet);
-    av_frame_free(&m_frame);
-    sws_freeContext(m_swsCtx);
-    av_dict_free(&m_options);
+    std::invoke(&MediumFrame::clearMedia, this);
 }
 
 auto MediumFrame::getUrl() const noexcept -> std::string
@@ -96,10 +91,7 @@ auto MediumFrame::getFrameState() noexcept -> bool
 
 auto MediumFrame::avOpenInput() noexcept -> bool
 {
-    if (m_formatCtx)
-    {
-        avformat_close_input(&m_formatCtx);
-    }
+    m_formatCtx = avformat_alloc_context();
     if (avformat_open_input(&m_formatCtx, m_url.c_str(), nullptr, &m_options) < 0)
     {
         return false;
@@ -151,10 +143,6 @@ auto MediumFrame::initCodecContext() noexcept -> bool
     {
         return false;
     }
-    if (m_swsCtx)
-    {
-        sws_freeContext(m_swsCtx);
-    }
     m_swsCtx = sws_getContext(
         srcW, srcH, srcFmt,
         srcW, srcH, AV_PIX_FMT_BGR24,
@@ -169,9 +157,85 @@ auto MediumFrame::initCodecContext() noexcept -> bool
     return true;
 }
 
+auto MediumFrame::flushPacket() noexcept -> MediumFrameGenerator
+{
+    if (!m_packet)
+    {
+        m_packet = av_packet_alloc();
+    }
+    if (!m_frame)
+    {
+        m_frame = av_frame_alloc();
+    }
+    while (av_read_frame(m_formatCtx, m_packet) >= 0 && m_frameHandle)
+    {
+        if (m_packet->stream_index != m_videoIndex)
+        {
+            av_packet_unref(m_packet);
+            continue;
+        }
+        if (avcodec_send_packet(m_codecCtx, m_packet) < 0)
+        {
+            av_packet_unref(m_packet);
+            continue;
+        }
+        int ret{avcodec_receive_frame(m_codecCtx, m_frame)};
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+        {
+            av_frame_unref(m_frame);
+            continue;
+        }
+        else if (ret < 0)
+        {
+            av_frame_unref(m_frame);
+            continue;
+        }
+        av_packet_unref(m_packet);
+        if (m_frame)
+        {
+            co_yield m_frame;
+        }
+        av_frame_unref(m_frame);
+    }
+}
+
+auto MediumFrame::clearMedia() noexcept -> void
+{
+    if (m_formatCtx)
+    {
+        avformat_close_input(&m_formatCtx);
+    }
+    if (m_codecCtx)
+    {
+        avcodec_free_context(&m_codecCtx);
+    }
+    if (m_swsCtx)
+    {
+        sws_freeContext(m_swsCtx);
+    }
+    if (m_packet)
+    {
+        av_packet_free(&m_packet);
+    }
+    if (m_frame)
+    {
+        av_frame_free(&m_frame);
+    }
+    if (m_options)
+    {
+        av_dict_free(&m_options);
+    }
+}
+
 void MediumFrame::onUrlChanged()
 {
     m_frameHandle = false;
+    m_formatCtx   = nullptr;
+    m_codecCtx    = nullptr;
+    m_swsCtx      = nullptr;
+    m_packet      = nullptr;
+    m_frame       = nullptr;
+    m_options     = nullptr;
     auto urlStr{boost::urls::parse_uri(m_url)};
     if (!urlStr.has_value())
     {
@@ -179,19 +243,19 @@ void MediumFrame::onUrlChanged()
     }
     if (std::string{urlStr.value().scheme()} == std::string{"rtsp"})
     {
-        m_urlFormat = UrlFormat::RTSP;
+        this->setUrlFormat(UrlFormat::RTSP);
     }
     else if (std::string{urlStr.value().scheme()} == std::string{"rtmp"})
     {
-        m_urlFormat = UrlFormat::RTMP;
+        this->setUrlFormat(UrlFormat::RTMP);
     }
     else if (std::string{urlStr.value().scheme()} == std::string{"udp"})
     {
-        m_urlFormat = UrlFormat::UDP;
+        this->setUrlFormat(UrlFormat::UDP);
     }
     else
     {
-        m_urlFormat = UrlFormat::OTHER;
+        this->setUrlFormat(UrlFormat::OTHER);
     }
 }
 
@@ -236,17 +300,12 @@ void MediumFrame::onUrlFormatChanged()
     std::map<const char*, const char*> udpOptionsMap{};
 
     auto setOptions{[this](const std::map<const char*, const char*>& _map) {
-        if (m_options)
-        {
-            av_dict_free(&m_options);
-        }
         for (const auto& [__key, __value] : _map)
         {
             av_dict_set(&m_options, __key, __value, 0);
         }
     }};
 
-    m_frameHandle = false;
     if (m_urlFormat == UrlFormat::RTSP || m_urlFormat == UrlFormat::RTMP || m_urlFormat == UrlFormat::UDP)
     {
         std::invoke(setOptions, smuOptionsMap);
@@ -262,54 +321,5 @@ void MediumFrame::onUrlFormatChanged()
         {
             std::invoke(setOptions, udpOptionsMap);
         }
-    }
-}
-
-auto MediumFrame::flushPacket() noexcept -> MediumFrameGenerator
-{
-    AVFrame* latestFrame{nullptr};
-    while (av_read_frame(m_formatCtx, m_packet) >= 0 && m_frameHandle)
-    {
-        if (m_packet->stream_index != m_videoIndex)
-        {
-            continue;
-        }
-        if (avcodec_send_packet(m_codecCtx, m_packet) < 0)
-        {
-            continue;
-        }
-        while (true)
-        {
-            AVFrame* tmpFrame{av_frame_alloc()};
-            int      ret{avcodec_receive_frame(m_codecCtx, tmpFrame)};
-            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-            {
-                av_frame_free(&tmpFrame);
-                break;
-            }
-            else if (ret < 0)
-            {
-                av_frame_free(&tmpFrame);
-                break;
-            }
-            if (latestFrame)
-            {
-                av_frame_unref(latestFrame);
-                av_frame_free(&latestFrame);
-            }
-            latestFrame = tmpFrame;
-        }
-        av_packet_unref(m_packet);
-        if (latestFrame)
-        {
-            co_yield latestFrame;
-            latestFrame = nullptr;
-        }
-    }
-    // 解码完毕，释放最新帧
-    if (latestFrame)
-    {
-        av_frame_unref(latestFrame);
-        av_frame_free(&latestFrame);
     }
 }

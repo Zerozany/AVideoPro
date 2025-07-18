@@ -102,6 +102,8 @@ private:
 
     auto initCodecContext() noexcept -> bool;
 
+    auto clearMedia() noexcept -> void;
+
 Q_SIGNALS:
     void urlChanged();
 
@@ -116,11 +118,11 @@ private:
     std::string      m_url{};
     UrlFormat        m_urlFormat{};
     AVDictionary*    m_options{nullptr};
-    AVFormatContext* m_formatCtx{avformat_alloc_context()};
+    AVFormatContext* m_formatCtx{nullptr};
     int              m_videoIndex{};
     AVCodecContext*  m_codecCtx{nullptr};
     SwsContext*      m_swsCtx{nullptr};
-    AVPacket*        m_packet{av_packet_alloc()};
-    AVFrame*         m_frame{av_frame_alloc()};
+    AVPacket*        m_packet{nullptr};
     bool             m_frameHandle{false};
+    AVFrame*         m_frame{nullptr};
 };

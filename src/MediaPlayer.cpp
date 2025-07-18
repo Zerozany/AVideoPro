@@ -23,10 +23,11 @@ auto MediaPlayer::play() noexcept -> void
         auto        gen{m_mediumFrame->flushPacket()};
         SwsContext* swsCtx{nullptr};
         uint8_t*    buffer{nullptr};
+        AVFrame*    frame{nullptr};
         int         bufSize{};
         while (gen.next() && m_mediumFrame->getFrameState())
         {
-            AVFrame*      frame{gen.current()};
+            frame = gen.current();
             int           width{frame->width};
             int           height{frame->height};
             AVPixelFormat srcFormat{static_cast<AVPixelFormat>(frame->format)};
@@ -59,7 +60,11 @@ auto MediaPlayer::play() noexcept -> void
             {
                 continue;
             }
-            this->setFramePix(pixmap);
+            this->setFramePix(std::move(pixmap));
+            if (frame)
+            {
+                av_frame_unref(frame);
+            }
         }
         if (swsCtx)
         {
@@ -68,6 +73,10 @@ auto MediaPlayer::play() noexcept -> void
         if (buffer)
         {
             av_free(buffer);
+        }
+        if (frame)
+        {
+            av_frame_free(&frame);
         }
     }}.detach();
 }
@@ -103,26 +112,32 @@ auto MediaPlayer::initMediaPlayer() noexcept -> void
     m_graphicsView->show();
 
     //----
-    // QPushButton* btn{new QPushButton{"ssss", this}};
-    // btn->setGeometry(50, 50, 200, 40);
-    // btn->setStyleSheet(R"(
-    //     QPushButton {
-    //         background-color: rgba(0, 0, 0, 0);  /* 完全透明背景 */
-    //         color: rgba(0, 0, 0, 0);             /* 文字透明 */
-    //         border: none;                       /* 无边框 */
-    //     }
-    //     QPushButton:hover {
-    //         background-color: rgba(0, 0, 0, 0);  /* 仍然透明背景 */
-    //         color: white;                       /* 显示白色文字 */
-    //         border: 1px solid #2980b9;          /* 显示边框 */
-    //     }
-    //     QPushButton:pressed {
-    //         background-color: rgba(200, 200, 200, 80); /* 点击时浅灰背景，80为透明度 */
-    //     }
-    // )");
-    // connect(btn, &QPushButton::clicked, this, [this] {
-    //     setUrl(std::string{R"(rtmp://ns8.indexforce.com/home/mystream)"});
-    // });
+    QPushButton* btn{new QPushButton{"ssss", this}};
+    btn->setGeometry(50, 50, 200, 40);
+    btn->setStyleSheet(R"(
+        QPushButton {
+            background-color: rgba(0, 0, 0, 0);  /* 完全透明背景 */
+            color: rgba(0, 0, 0, 0);             /* 文字透明 */
+            border: none;                       /* 无边框 */
+        }
+        QPushButton:hover {
+            background-color: rgba(0, 0, 0, 0);  /* 仍然透明背景 */
+            color: white;                       /* 显示白色文字 */
+            border: 1px solid #2980b9;          /* 显示边框 */
+        }
+        QPushButton:pressed {
+            background-color: rgba(200, 200, 200, 80); /* 点击时浅灰背景，80为透明度 */
+        }
+    )");
+    connect(btn, &QPushButton::clicked, this, [this] {
+        setUrl(std::string{R"(http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/gear2/prog_index.m3u8)"});
+    });
+
+    QPushButton* btn1{new QPushButton{"xxxx", this}};
+    btn1->setGeometry(50, 100, 200, 40);
+    connect(btn1, &QPushButton::clicked, this, [this] {
+        this->play();
+    });
 }
 
 auto MediaPlayer::connectSignalToSlot() noexcept -> void
@@ -137,7 +152,7 @@ void MediaPlayer::resizeEvent(QResizeEvent* _event)
     {
         return;
     }
-    QPixmap scaled = m_framePix.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    QPixmap scaled{m_framePix.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation)};
     m_graphicsPixmapItem->setPixmap(scaled);
 
     QWidget::resizeEvent(_event);
@@ -145,7 +160,7 @@ void MediaPlayer::resizeEvent(QResizeEvent* _event)
 
 void MediaPlayer::onFramePixChanged(QPixmap _pixmap)
 {
-    m_framePix     = _pixmap;
-    QPixmap scaled = m_framePix.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    m_framePix = _pixmap;
+    QPixmap scaled{m_framePix.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation)};
     m_graphicsPixmapItem->setPixmap(scaled);
 }
