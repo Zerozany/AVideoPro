@@ -3,12 +3,15 @@ _Pragma("once");
 #include <QGraphicsScene>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <memory>
+#include <thread>
+
 extern "C" {
 #include <libavutil/imgutils.h>
 }
 
+#include "MediaFrame.h"
 #include "MediaView.h"
-#include "MediumFrame.h"
 
 class QResizeEvent;
 
@@ -18,12 +21,10 @@ class MediaPlayer : public QWidget
     Q_PROPERTY(QPixmap framePix READ getFramePix WRITE setFramePix NOTIFY framePixChanged)
 public:
     explicit(true) MediaPlayer(QWidget* _parent = nullptr);
-    ~MediaPlayer() noexcept = default;
+    ~MediaPlayer() noexcept;
 
 public:
     auto play() noexcept -> void;
-
-    auto setUrl(const std::string& _url) noexcept -> void;
 
 private:
     auto getFramePix() const noexcept -> QPixmap;
@@ -44,10 +45,11 @@ private Q_SLOTS:
     void onFramePixChanged(QPixmap _pixmap);
 
 private:
-    QVBoxLayout*         m_mainLayout{new QVBoxLayout{this}};
-    QGraphicsScene*      m_graphicsScene{new QGraphicsScene{}};
-    MediaView*           m_graphicsView{new MediaView{m_graphicsScene}};
-    QGraphicsPixmapItem* m_graphicsPixmapItem{new QGraphicsPixmapItem{}};
-    QPixmap              m_framePix{};
-    MediumFrame*         m_mediumFrame{new MediumFrame{}};
+    QVBoxLayout*                m_mainLayout{new QVBoxLayout{this}};
+    QGraphicsScene*             m_graphicsScene{new QGraphicsScene{}};
+    MediaView*                  m_graphicsView{new MediaView{m_graphicsScene}};
+    QGraphicsPixmapItem*        m_graphicsPixmapItem{new QGraphicsPixmapItem{}};
+    std::string                 m_url{};
+    QPixmap                     m_framePix{};
+    std::shared_ptr<MediaFrame> m_mediumFrame{nullptr};
 };

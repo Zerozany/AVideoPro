@@ -68,7 +68,6 @@ int main(int argc, char* argv[])
     MediaPlayer  mediaPlay{};
     mediaPlay.resize(1280, 720);
     mediaPlay.show();
-    mediaPlay.setUrl(R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)");
     mediaPlay.play();
     QApplication::exec();
 }

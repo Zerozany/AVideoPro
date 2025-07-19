@@ -4,17 +4,106 @@
 
 #include <QPushButton>
 #include <QResizeEvent>
-#include <thread>
+#include <boost/url.hpp>
 
 MediaPlayer::MediaPlayer(QWidget* _parent) : QWidget{_parent}
 {
+    m_mediumFrame.reset(new MediaFrame{});
+
     std::invoke(&MediaPlayer::initMediaPlayer, this);
     std::invoke(&MediaPlayer::connectSignalToSlot, this);
 }
 
+MediaPlayer::~MediaPlayer() noexcept
+{
+}
+
+auto MediaPlayer::getFramePix() const noexcept -> QPixmap
+{
+    return this->m_framePix;
+}
+
+auto MediaPlayer::setFramePix(const QPixmap& _pixmap) noexcept -> void
+{
+    if (m_framePix.cacheKey() == _pixmap.cacheKey())
+    {
+        return;
+    }
+    m_framePix = _pixmap;
+    Q_EMIT this->framePixChanged(m_framePix);
+}
+
+auto MediaPlayer::initMediaPlayer() noexcept -> void
+{
+    m_graphicsScene->setSceneRect(this->rect());
+    m_graphicsScene->setBackgroundBrush(Qt::black);
+    m_graphicsView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_graphicsView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_graphicsView->setContentsMargins(0, 0, 0, 0);
+    m_mainLayout->setContentsMargins(0, 0, 0, 0);
+    m_mainLayout->addWidget(m_graphicsView);
+    m_graphicsScene->addItem(m_graphicsPixmapItem);
+    m_graphicsPixmapItem->setPos(0, 0);
+    m_graphicsView->show();
+
+    //----
+    QPushButton* btn{new QPushButton{"ssss", this}};
+    btn->setGeometry(50, 50, 200, 40);
+    btn->setStyleSheet(R"(
+        QPushButton {
+            background-color: rgba(0, 0, 0, 0);  /* 完全透明背景 */
+            color: rgba(0, 0, 0, 0);             /* 文字透明 */
+            border: none;                       /* 无边框 */
+        }
+        QPushButton:hover {
+            background-color: rgba(0, 0, 0, 0);  /* 仍然透明背景 */
+            color: white;                       /* 显示白色文字 */
+            border: 1px solid #2980b9;          /* 显示边框 */
+        }
+        QPushButton:pressed {
+            background-color: rgba(200, 200, 200, 80); /* 点击时浅灰背景，80为透明度 */
+        }
+    )");
+    // connect(btn, &QPushButton::clicked, this, [this] {
+    //     m_mediumFrame->setUrl(std::string{R"(http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/gear2/prog_index.m3u8)"});
+    // });
+    m_mediumFrame->setUrl(std::string{R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)"});
+
+    // QPushButton* btn1{new QPushButton{"xxxx", this}};
+    // btn1->setGeometry(50, 100, 200, 40);
+    // connect(btn1, &QPushButton::clicked, this, [this] {
+    //     this->play();
+    // });
+}
+
+auto MediaPlayer::connectSignalToSlot() noexcept -> void
+{
+    connect(this, &MediaPlayer::framePixChanged, this, &MediaPlayer::onFramePixChanged);
+}
+
+void MediaPlayer::resizeEvent(QResizeEvent* _event)
+{
+    m_graphicsScene->setSceneRect(this->rect());
+    if (m_framePix.isNull())
+    {
+        return;
+    }
+    QPixmap scaled{m_framePix.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation)};
+    m_graphicsPixmapItem->setPixmap(scaled);
+
+    QWidget::resizeEvent(_event);
+}
+
+void MediaPlayer::onFramePixChanged(QPixmap _pixmap)
+{
+    m_framePix = _pixmap;
+    QPixmap scaled{m_framePix.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation)};
+    m_graphicsPixmapItem->setPixmap(scaled);
+}
+
 auto MediaPlayer::play() noexcept -> void
 {
-    if (!m_mediumFrame->getFrameState())
+    if (!m_mediumFrame->getMediaState())
     {
         spdlog::error("Live streaming address resolution failed or is invalid");
         return;
@@ -25,7 +114,7 @@ auto MediaPlayer::play() noexcept -> void
         uint8_t*    buffer{nullptr};
         AVFrame*    frame{nullptr};
         int         bufSize{};
-        while (gen.next() && m_mediumFrame->getFrameState())
+        while (gen.nextValue())
         {
             frame = gen.current();
             int           width{frame->width};
@@ -79,88 +168,4 @@ auto MediaPlayer::play() noexcept -> void
             av_frame_free(&frame);
         }
     }}.detach();
-}
-
-auto MediaPlayer::setUrl(const std::string& _url) noexcept -> void
-{
-    m_mediumFrame->setUrl(_url);
-    m_mediumFrame->mediumStart();
-}
-
-auto MediaPlayer::getFramePix() const noexcept -> QPixmap
-{
-    return this->m_framePix;
-}
-
-auto MediaPlayer::setFramePix(const QPixmap& _pixmap) noexcept -> void
-{
-    m_framePix = _pixmap;
-    Q_EMIT this->framePixChanged(m_framePix);
-}
-
-auto MediaPlayer::initMediaPlayer() noexcept -> void
-{
-    m_graphicsScene->setSceneRect(this->rect());
-    m_graphicsScene->setBackgroundBrush(Qt::black);
-    m_graphicsView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_graphicsView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_graphicsView->setContentsMargins(0, 0, 0, 0);
-    m_mainLayout->setContentsMargins(0, 0, 0, 0);
-    m_mainLayout->addWidget(m_graphicsView);
-    m_graphicsScene->addItem(m_graphicsPixmapItem);
-    m_graphicsPixmapItem->setPos(0, 0);
-    m_graphicsView->show();
-
-    //----
-    QPushButton* btn{new QPushButton{"ssss", this}};
-    btn->setGeometry(50, 50, 200, 40);
-    btn->setStyleSheet(R"(
-        QPushButton {
-            background-color: rgba(0, 0, 0, 0);  /* 完全透明背景 */
-            color: rgba(0, 0, 0, 0);             /* 文字透明 */
-            border: none;                       /* 无边框 */
-        }
-        QPushButton:hover {
-            background-color: rgba(0, 0, 0, 0);  /* 仍然透明背景 */
-            color: white;                       /* 显示白色文字 */
-            border: 1px solid #2980b9;          /* 显示边框 */
-        }
-        QPushButton:pressed {
-            background-color: rgba(200, 200, 200, 80); /* 点击时浅灰背景，80为透明度 */
-        }
-    )");
-    connect(btn, &QPushButton::clicked, this, [this] {
-        setUrl(std::string{R"(http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/gear2/prog_index.m3u8)"});
-    });
-
-    QPushButton* btn1{new QPushButton{"xxxx", this}};
-    btn1->setGeometry(50, 100, 200, 40);
-    connect(btn1, &QPushButton::clicked, this, [this] {
-        this->play();
-    });
-}
-
-auto MediaPlayer::connectSignalToSlot() noexcept -> void
-{
-    connect(this, &MediaPlayer::framePixChanged, this, &MediaPlayer::onFramePixChanged);
-}
-
-void MediaPlayer::resizeEvent(QResizeEvent* _event)
-{
-    m_graphicsScene->setSceneRect(this->rect());
-    if (m_framePix.isNull())
-    {
-        return;
-    }
-    QPixmap scaled{m_framePix.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation)};
-    m_graphicsPixmapItem->setPixmap(scaled);
-
-    QWidget::resizeEvent(_event);
-}
-
-void MediaPlayer::onFramePixChanged(QPixmap _pixmap)
-{
-    m_framePix = _pixmap;
-    QPixmap scaled{m_framePix.scaled(this->size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation)};
-    m_graphicsPixmapItem->setPixmap(scaled);
 }

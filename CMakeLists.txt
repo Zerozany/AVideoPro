@@ -30,7 +30,7 @@ else()
     add_compile_options(-Wall -Wextra) # MinGW/GCC 的选项
 endif()
 
-add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
+add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
     AUTOUIC ON
