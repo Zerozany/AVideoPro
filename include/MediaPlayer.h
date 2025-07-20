@@ -49,7 +49,6 @@ private:
     QGraphicsScene*             m_graphicsScene{new QGraphicsScene{}};
     MediaView*                  m_graphicsView{new MediaView{m_graphicsScene}};
     QGraphicsPixmapItem*        m_graphicsPixmapItem{new QGraphicsPixmapItem{}};
-    std::string                 m_url{};
+    std::shared_ptr<MediaFrame> m_mediumFrame{std::make_shared<MediaFrame>()};
     QPixmap                     m_framePix{};
-    std::shared_ptr<MediaFrame> m_mediumFrame{nullptr};
 };

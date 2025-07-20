@@ -8,8 +8,6 @@
 
 MediaPlayer::MediaPlayer(QWidget* _parent) : QWidget{_parent}
 {
-    m_mediumFrame.reset(new MediaFrame{});
-
     std::invoke(&MediaPlayer::initMediaPlayer, this);
     std::invoke(&MediaPlayer::connectSignalToSlot, this);
 }
@@ -46,6 +44,8 @@ auto MediaPlayer::initMediaPlayer() noexcept -> void
     m_graphicsPixmapItem->setPos(0, 0);
     m_graphicsView->show();
 
+    m_mediumFrame->setUrl(std::string{R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)"});
+    m_mediumFrame->mediaStart();
     //----
     QPushButton* btn{new QPushButton{"ssss", this}};
     btn->setGeometry(50, 50, 200, 40);
@@ -64,16 +64,19 @@ auto MediaPlayer::initMediaPlayer() noexcept -> void
             background-color: rgba(200, 200, 200, 80); /* 点击时浅灰背景，80为透明度 */
         }
     )");
-    // connect(btn, &QPushButton::clicked, this, [this] {
-    //     m_mediumFrame->setUrl(std::string{R"(http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/gear2/prog_index.m3u8)"});
-    // });
-    m_mediumFrame->setUrl(std::string{R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)"});
+    connect(btn, &QPushButton::clicked, this, [this] {
+        if (m_mediumFrame.get()->getMediaState())
+        {
+            m_mediumFrame->setUrl(std::string{R"(rtmp://ns8.indexforce.com/home/mystream)"});
+            m_mediumFrame->mediaStart();
+        }
+    });
 
-    // QPushButton* btn1{new QPushButton{"xxxx", this}};
-    // btn1->setGeometry(50, 100, 200, 40);
-    // connect(btn1, &QPushButton::clicked, this, [this] {
-    //     this->play();
-    // });
+    QPushButton* btn1{new QPushButton{"xxxx", this}};
+    btn1->setGeometry(50, 100, 200, 40);
+    connect(btn1, &QPushButton::clicked, this, [this] {
+        this->play();
+    });
 }
 
 auto MediaPlayer::connectSignalToSlot() noexcept -> void
@@ -117,11 +120,9 @@ auto MediaPlayer::play() noexcept -> void
         while (gen.nextValue())
         {
             frame = gen.current();
-            int           width{frame->width};
-            int           height{frame->height};
             AVPixelFormat srcFormat{static_cast<AVPixelFormat>(frame->format)};
             // 如果swsCtx还没创建，或者分辨率改变，重新创建swsCtx和buffer
-            if (!swsCtx || bufSize != width * height * 4)
+            if (!swsCtx || bufSize != frame->width * frame->height * 4)
             {
                 if (swsCtx)
                 {
@@ -132,18 +133,18 @@ auto MediaPlayer::play() noexcept -> void
                     av_free(buffer);
                 }
                 swsCtx = sws_getContext(
-                    width, height, srcFormat,
-                    width, height, AV_PIX_FMT_RGBA,
+                    frame->width, frame->height, srcFormat,
+                    frame->width, frame->height, AV_PIX_FMT_RGBA,
                     SWS_BILINEAR,
                     nullptr, nullptr, nullptr);
-                bufSize = av_image_get_buffer_size(AV_PIX_FMT_RGBA, width, height, 1);
+                bufSize = av_image_get_buffer_size(AV_PIX_FMT_RGBA, frame->width, frame->height, 1);
                 buffer  = (uint8_t*)av_malloc(bufSize);
             }
             uint8_t* dstData[4]{buffer, nullptr, nullptr, nullptr};
-            int      dstLinesize[4]{4 * width, 0, 0, 0};
-            sws_scale(swsCtx, frame->data, frame->linesize, 0, height, dstData, dstLinesize);
+            int      dstLinesize[4]{4 * frame->width, 0, 0, 0};
+            sws_scale(swsCtx, frame->data, frame->linesize, 0, frame->height, dstData, dstLinesize);
             // 直接用buffer构造QImage，不拷贝内存，避免性能损失
-            QImage  image{buffer, width, height, dstLinesize[0], QImage::Format_RGBA8888};
+            QImage  image{buffer, frame->width, frame->height, dstLinesize[0], QImage::Format_RGBA8888};
             QPixmap pixmap{QPixmap::fromImage(image.copy())};
             if (pixmap.isNull())
             {

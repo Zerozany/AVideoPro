@@ -43,6 +43,8 @@ public:
 
     auto getMediaState() noexcept -> bool;
 
+    auto mediaStart() noexcept -> void;
+
 private:
     auto connectSignalToSlot() noexcept -> void;
 

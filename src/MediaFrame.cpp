@@ -1,5 +1,7 @@
 #include "MediaFrame.h"
 
+#include <spdlog/spdlog.h>
+
 #include <boost/url.hpp>
 
 MediaFrame::MediaFrame()
@@ -10,29 +12,51 @@ MediaFrame::MediaFrame()
 
 MediaFrame::~MediaFrame() noexcept
 {
-    if (m_formatCtx)
+    if (m_frameHandle.load())
     {
-        avformat_close_input(&m_formatCtx);
+        m_frameHandle.store(false);
     }
-    if (m_codecCtx)
-    {
-        avcodec_free_context(&m_codecCtx);
-    }
+
+    // 1. 释放 swsCtx
     if (m_swsCtx)
     {
         sws_freeContext(m_swsCtx);
+        m_swsCtx = nullptr;
     }
-    if (m_packet)
-    {
-        av_packet_free(&m_packet);
-    }
+
+    // 2. 释放 AVFrame
     if (m_frame)
     {
         av_frame_free(&m_frame);
+        m_frame = nullptr;
     }
+
+    // 3. 释放 AVPacket
+    if (m_packet)
+    {
+        av_packet_free(&m_packet);
+        m_packet = nullptr;
+    }
+
+    // 4. 释放 AVCodecContext（必须在 formatCtx 之前）
+    if (m_codecCtx)
+    {
+        avcodec_free_context(&m_codecCtx);
+        m_codecCtx = nullptr;
+    }
+
+    // 5. 最后关闭 AVFormatContext
+    if (m_formatCtx)
+    {
+        avformat_close_input(&m_formatCtx);
+        m_formatCtx = nullptr;
+    }
+
+    // 6. 字典
     if (m_options)
     {
         av_dict_free(&m_options);
+        m_options = nullptr;
     }
 }
 
@@ -72,6 +96,28 @@ auto MediaFrame::connectSignalToSlot() noexcept -> void
     connect(this, &MediaFrame::urlTypeChanged, this, &MediaFrame::onUrlTypeChanged);
 }
 
+auto MediaFrame::mediaStart() noexcept -> void
+{
+    if (!std::invoke(&MediaFrame::mediaOpenInput, this))
+    {
+        spdlog::error("Media stream opening failed");
+        return;
+    }
+    if (!std::invoke(&MediaFrame::findVideoStream, this))
+    {
+        spdlog::error("Failed to search for media stream");
+        return;
+    }
+    if (!std::invoke(&MediaFrame::codecContext, this))
+    {
+        spdlog::error("Media stream parsing failed");
+        return;
+    }
+
+    m_frameHandle.store(true);
+    spdlog::info("Media initialization has been completed");
+}
+
 auto MediaFrame::onUrlChanged() noexcept -> void
 {
     if (m_frameHandle.load())
@@ -95,19 +141,6 @@ auto MediaFrame::onUrlChanged() noexcept -> void
     {
         this->setUrlType(MediaFrame::UrlType::UDP);
     }
-    if (!std::invoke(&MediaFrame::mediaOpenInput, this))
-    {
-        return;
-    }
-    if (!std::invoke(&MediaFrame::findVideoStream, this))
-    {
-        return;
-    }
-    if (!std::invoke(&MediaFrame::codecContext, this))
-    {
-        return;
-    }
-    m_frameHandle.store(true);
 }
 
 auto MediaFrame::onUrlTypeChanged() noexcept -> void
@@ -165,6 +198,7 @@ auto MediaFrame::flushPacket() noexcept -> Generator<AVFrame>
     {
         if (!m_frameHandle.load())
         {
+            spdlog::info("Video frame export has been turned off");
             co_return;
         }
         if (m_packet->stream_index != m_videoIndex)
@@ -185,6 +219,7 @@ auto MediaFrame::flushPacket() noexcept -> Generator<AVFrame>
         }
         else if (ret == AVERROR_EOF)
         {
+            spdlog::info("Video frame export has been eof");
             co_return;
         }
         else if (ret < 0)
@@ -208,6 +243,10 @@ auto MediaFrame::getMediaState() noexcept -> bool
 
 auto MediaFrame::mediaOpenInput() noexcept -> bool
 {
+    if (m_formatCtx)
+    {
+        avio_flush(m_formatCtx->pb);
+    }
     m_formatCtx = avformat_alloc_context();
     if (avformat_open_input(&m_formatCtx, m_url.c_str(), nullptr, &m_options) < 0)
     {
@@ -232,12 +271,37 @@ auto MediaFrame::findVideoStream() noexcept -> bool
 
 auto MediaFrame::codecContext() noexcept -> bool
 {
+#if false
+    AVBufferRef* hw_device_ctx = NULL;
+    AVBufferRef* hw_frames_ref = NULL;
+    // 创建硬件设备上下文
+    if (av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, 0) < 0)
+    {
+        return false;
+    }
+#endif
     AVCodecParameters* codecParameters{m_formatCtx->streams[m_videoIndex]->codecpar};
+    if (m_codecCtx)
+    {
+        avcodec_flush_buffers(m_codecCtx);
+    }
     m_codecCtx = avcodec_alloc_context3(nullptr);
     if (!m_codecCtx)
     {
         return false;
     }
+#if false
+    m_codecCtx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
+    // 获取硬件帧参数
+    if (avcodec_get_hw_frames_parameters(m_codecCtx, hw_device_ctx, AV_PIX_FMT_CUDA, &hw_frames_ref) < 0)
+    {
+        return false;
+    }
+    // 释放临时引用
+    m_codecCtx->hw_frames_ctx = av_buffer_ref(hw_frames_ref);
+    // 释放临时引用
+    av_buffer_unref(&hw_frames_ref);
+#endif
     if (avcodec_parameters_to_context(m_codecCtx, codecParameters) < 0)
     {
         return false;
@@ -257,6 +321,10 @@ auto MediaFrame::codecContext() noexcept -> bool
     if (srcFmt == AV_PIX_FMT_NONE)
     {
         return false;
+    }
+    if (m_swsCtx)
+    {
+        m_swsCtx = nullptr;
     }
     m_swsCtx = sws_getContext(
         m_codecCtx->width, m_codecCtx->height, srcFmt,
