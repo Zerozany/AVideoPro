@@ -13,13 +13,13 @@ struct Generator
 
         auto final_suspend() noexcept -> std::suspend_always;
 
-        auto yield_value(T* _value) noexcept -> std::suspend_always;
+        auto yield_value(T _value) noexcept -> std::suspend_always;
 
         auto unhandled_exception() -> void;
 
         auto return_void() -> void;
 
-        T* value{nullptr};
+        T value{};
     };
 
 public:
@@ -28,7 +28,7 @@ public:
 
     auto nextValue() noexcept -> bool;
 
-    auto current() const noexcept -> T*;
+    auto current() const noexcept -> T;
 
 private:
     std::coroutine_handle<promise_type> m_handle;
@@ -62,7 +62,7 @@ inline auto Generator<T>::nextValue() noexcept -> bool
 }
 
 template <typename T>
-inline auto Generator<T>::current() const noexcept -> T*
+inline auto Generator<T>::current() const noexcept -> T
 {
     return m_handle.promise().value;
 }
@@ -86,7 +86,7 @@ inline auto Generator<T>::promise_type::final_suspend() noexcept -> std::suspend
 }
 
 template <typename T>
-inline auto Generator<T>::promise_type::yield_value(T* _value) noexcept -> std::suspend_always
+inline auto Generator<T>::promise_type::yield_value(T _value) noexcept -> std::suspend_always
 {
     value = _value;
     return {};

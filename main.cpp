@@ -1,78 +1,57 @@
 #include <QApplication>
-#include <QPixmap>
-#include <iostream>
-#include <opencv2/opencv.hpp>
+#include <QDir>
+#include <QImage>
+#include <print>
 #include <thread>
 
-// #include "MediumFrame.h"
-#include "MediaPlayer.h"
+#include "MediaFrame.h"
+#include "MediaPlay.h"
 
-#if false
-void save_frame_seq(AVFrame* frame)
+auto FrameImageTest() -> void
 {
-    static SwsContext* sws_ctx{nullptr};
-    static cv::Mat     img_bgr{};
-    if (!sws_ctx)
+    MediaFrame* mediaFrame = new MediaFrame{R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)"};
+    if (!mediaFrame->start())
     {
-        sws_ctx = sws_getContext(
-            frame->width, frame->height, (AVPixelFormat)frame->format,
-            frame->width, frame->height, AV_PIX_FMT_BGR24,
-            SWS_BILINEAR, nullptr, nullptr, nullptr);
+        return;
+    }
+    std::thread{[&mediaFrame] {
+        QDir().mkpath("./images");
+        int  index = 0;
+        auto gen   = mediaFrame->flushPacket();
+        while (gen.nextValue())
+        {
+            auto   data = gen.current();
+            QImage img{data.rgbBuffer.data(), data.width, data.height, data.lineSize, QImage::Format_RGB888};
 
-        img_bgr = cv::Mat(frame->height, frame->width, CV_8UC3);
-    }
-    uint8_t* dst_data[1]{img_bgr.data};
-    int      dst_linesize[1]{static_cast<int>(img_bgr.step[0])};
-    sws_scale(sws_ctx, frame->data, frame->linesize, 0, frame->height, dst_data, dst_linesize);
-    cv::imshow("Video", img_bgr);
-    if (cv::waitKey(1) == 27)
-    {
-        // ESC 退出
-        exit(0);
-    }
+            QString filename = QString("./images/frame_%1.png").arg(index++, 5, 10, QLatin1Char('0'));
+            img.save(filename);
+        }
+    }}.detach();
+
+    std::thread{[&mediaFrame] {
+        std::this_thread::sleep_for(std::chrono::seconds{5});
+    }}.join();
+
+    delete mediaFrame;
 }
-#endif
 
 int main(int argc, char* argv[])
 {
-#if false
-    cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
-
-    MediumFrame m_mediumFrame{};
-    m_mediumFrame.setStreamUrl(R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)");
-    m_mediumFrame.mediumStart();
-    auto gen = m_mediumFrame.flushPacket();
-#elif false
-    while (gen.next())
-    {
-        AVFrame* frame = gen.current();
-        save_frame_seq(frame);
-    }
-#elif false
-    std::thread{
-        [&gen]() {
-            while (gen.next())
-            {
-                AVFrame* frame = gen.current();
-                save_frame_seq(frame);
-            }
-        }}
-        .detach();
-    while (true)
-    {
-        std::cout << "....\n";
-    }
-    return 0;
-#endif
     QApplication app{argc, argv};
-    MediaPlayer  mediaPlay{};
+    MediaPlay    mediaPlay{};
     mediaPlay.resize(1280, 720);
     mediaPlay.show();
-    mediaPlay.play();
+
+    mediaPlay.setUrl(R"(rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid)");
+    std::thread{[&mediaPlay] {
+        mediaPlay.play();
+    }}.detach();
+
+    std::thread{[&mediaPlay] {
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        mediaPlay.setUrl(R"(rtmp://ns8.indexforce.com/home/mystream)");
+        mediaPlay.play();
+    }}.detach();
+
     QApplication::exec();
 }
-
-// rtmp://ns8.indexforce.com/home/mystream  伊拉克直播电视台
-// rtsp://77.110.228.219/axis-media/media.amp
-// rtmp://liteavapp.qcloud.com/live/liteavdemoplayerstreamid
-// http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/gear2/prog_index.m3u8

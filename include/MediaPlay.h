@@ -4,51 +4,51 @@ _Pragma("once");
 #include <QVBoxLayout>
 #include <QWidget>
 #include <memory>
-#include <thread>
-
-extern "C" {
-#include <libavutil/imgutils.h>
-}
 
 #include "MediaFrame.h"
 #include "MediaView.h"
 
-class QResizeEvent;
-
-class MediaPlayer : public QWidget
+class MediaPlay : public QWidget
 {
     Q_OBJECT
     Q_PROPERTY(QPixmap framePix READ getFramePix WRITE setFramePix NOTIFY framePixChanged)
-public:
-    explicit(true) MediaPlayer(QWidget* _parent = nullptr);
-    ~MediaPlayer() noexcept;
 
 public:
+    explicit(true) MediaPlay(QWidget* _parent = nullptr);
+    ~MediaPlay() noexcept;
+
+public:
+    auto setUrl(const std::string& _url) noexcept -> void;
+
     auto play() noexcept -> void;
+
+    auto stop() noexcept -> void;
 
 private:
     auto getFramePix() const noexcept -> QPixmap;
     auto setFramePix(const QPixmap& _pixmap) noexcept -> void;
 
 private:
-    auto initMediaPlayer() noexcept -> void;
+    auto initPlayerLayout() noexcept -> void;
 
     auto connectSignalToSlot() noexcept -> void;
+
+    auto getMediaFrame() noexcept -> void;
 
 protected:
     void resizeEvent(QResizeEvent* _event) override;
 
 Q_SIGNALS:
-    void framePixChanged(QPixmap _pixmap);
+    void framePixChanged();
 
 private Q_SLOTS:
-    void onFramePixChanged(QPixmap _pixmap);
+    void onFramePixChanged();
 
 private:
+    std::unique_ptr<MediaFrame> m_mediaFrame{nullptr};
     QVBoxLayout*                m_mainLayout{new QVBoxLayout{this}};
     QGraphicsScene*             m_graphicsScene{new QGraphicsScene{}};
     MediaView*                  m_graphicsView{new MediaView{m_graphicsScene}};
     QGraphicsPixmapItem*        m_graphicsPixmapItem{new QGraphicsPixmapItem{}};
-    std::shared_ptr<MediaFrame> m_mediumFrame{std::make_shared<MediaFrame>()};
     QPixmap                     m_framePix{};
 };
