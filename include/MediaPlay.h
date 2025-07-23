@@ -1,6 +1,8 @@
 _Pragma("once");
 #include <QGraphicsPixmapItem>
 #include <QGraphicsScene>
+#include <QLineEdit>
+#include <QPushButton>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <memory>
@@ -51,4 +53,8 @@ private:
     MediaView*                  m_graphicsView{new MediaView{m_graphicsScene}};
     QGraphicsPixmapItem*        m_graphicsPixmapItem{new QGraphicsPixmapItem{}};
     QPixmap                     m_framePix{};
+
+    QPushButton* btn1{new QPushButton{"play", this}};
+    QPushButton* btn2{new QPushButton{"stop", this}};
+    QLineEdit*   edit{new QLineEdit{this}};
 };

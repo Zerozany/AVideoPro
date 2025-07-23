@@ -1,7 +1,6 @@
 #include "MediaFrame.h"
 
 #include <boost/url.hpp>
-#include <iostream>
 
 extern "C" {
 #include <libavutil/imgutils.h>
@@ -98,7 +97,7 @@ auto MediaFrame::flushPacket() noexcept -> Generator<ImageData>
         av_packet_unref(packet);
         if (frame)
         {
-            int                  numBytes{av_image_get_buffer_size(AV_PIX_FMT_BGR24, frame->width, frame->height, 1)};
+            int                  numBytes{av_image_get_buffer_size(AV_PIX_FMT_RGB24, frame->width, frame->height, 1)};
             std::vector<uint8_t> rgbBuffer(numBytes);
             uint8_t*             dest[4]{rgbBuffer.data(), nullptr, nullptr, nullptr};
             int                  lineSize[4]{3 * frame->width, 0, 0, 0};
@@ -155,6 +154,13 @@ auto MediaFrame::setStreamUrl(const std::string& _url) noexcept -> void
 
 auto MediaFrame::setDictOptions() noexcept -> void
 {
+    auto setDictOptions{[this](const std::map<const char*, const char*>& _map) {
+        for (const auto& [__key, __value] : _map)
+        {
+            av_dict_set(&m_options, __key, __value, 0);
+        }
+    }};
+
     switch (m_urlHeader)
     {
         case UrlHeader::OTHER:
@@ -163,10 +169,12 @@ auto MediaFrame::setDictOptions() noexcept -> void
         }
         case UrlHeader::RTSP:
         {
+            setDictOptions(rtspDictMap);
             break;
         }
         case UrlHeader::RTMP:
         {
+            setDictOptions(rtmpDictMap);
             break;
         }
         default:
@@ -183,7 +191,7 @@ auto MediaFrame::initMedia() noexcept -> bool
         return false;
     }
     /// @brief 打开多媒体文件
-    if (avformat_open_input(&m_formatContext, m_url.data(), nullptr, nullptr) < 0)
+    if (avformat_open_input(&m_formatContext, m_url.data(), nullptr, &m_options) < 0)
     {
         return false;
     }
@@ -241,8 +249,8 @@ auto MediaFrame::initMedia() noexcept -> bool
     /// @brief 图像像素格式转换与缩放上下文的初始化或复用
     m_swsCtx = sws_getCachedContext(
         nullptr, m_codecContext->width, m_codecContext->height,
-        AV_PIX_FMT_YUV420P, m_codecContext->width, m_codecContext->height,
-        AV_PIX_FMT_BGR24, SWS_BICUBIC, nullptr, nullptr, nullptr);
+        static_cast<AVPixelFormat>(m_codecContext->pix_fmt), m_codecContext->width, m_codecContext->height,
+        AV_PIX_FMT_RGB24, SWS_FAST_BILINEAR, nullptr, nullptr, nullptr);
     // SWS_BICUBIC 双三次插值
     // SWS_LANCZOS 高清图片
     // SWS_FAST_BILINEAR 低延迟低质量图片

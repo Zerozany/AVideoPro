@@ -1,6 +1,7 @@
 #include "MediaPlay.h"
 
 #include <QResizeEvent>
+#include <thread>
 
 MediaPlay::MediaPlay(QWidget* _parent) : QWidget{_parent}
 {
@@ -76,6 +77,26 @@ auto MediaPlay::initPlayerLayout() noexcept -> void
     m_graphicsScene->addItem(m_graphicsPixmapItem);
     m_graphicsPixmapItem->setPos(0, 0);
     m_graphicsView->show();
+
+    ///
+
+    edit->setGeometry(50, 10, 300, 30);
+    btn1->setGeometry(50, 50, 100, 30);
+    btn2->setGeometry(50, 100, 100, 30);
+    edit->raise();
+    btn1->raise();
+    btn2->raise();
+    connect(btn1, &QPushButton::clicked, this, [this] {
+        std::thread{[this] {
+            this->setUrl(edit->text().toStdString());
+            this->play();
+        }}.detach();
+    });
+    connect(btn2, &QPushButton::clicked, this, [this] {
+        std::thread{[this] {
+            this->stop();
+        }}.detach();
+    });
 }
 
 auto MediaPlay::connectSignalToSlot() noexcept -> void
